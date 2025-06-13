@@ -28,19 +28,34 @@ namespace simple_conv {
             }
         }
 
-        inline void apply_soft_max(cv::Mat &processing_layer) {
-            auto *p_inp_data = (float *) processing_layer.data;
-            float exp_sum = 0;
-            for (int value_idx = 0; value_idx < processing_layer.total(); value_idx++) {
-                float *current_cell = p_inp_data + value_idx;
-                float exp_ = safe_exp(*current_cell);
-                exp_sum += exp_;
-                *current_cell = exp_;
+        inline void apply_soft_max(cv::Mat &processing_layer, float temperature = .5f) {
+            auto *p_inp_data = (float *)processing_layer.data;
+            const int num_values = (int)processing_layer.total();
+
+            if (num_values == 0 || temperature <= 0.0f || std::isnan(temperature)) {
+                return; // избегаем деления на ноль или nan'ов
             }
 
-            for (int value_idx = 0; value_idx < processing_layer.total(); value_idx++) {
-                float *current_cell = p_inp_data + value_idx;
-                *(current_cell) = *(current_cell) / exp_sum;
+            // Масштабируем входы по температуре
+            float max_val = -std::numeric_limits<float>::infinity();
+            for (int i = 0; i < num_values; ++i) {
+                float val = p_inp_data[i] / temperature;
+                if (val > max_val) max_val = val;
+            }
+
+            float exp_sum = 0.0f;
+            for (int i = 0; i < num_values; ++i) {
+                p_inp_data[i] = safe_exp(p_inp_data[i] / temperature - max_val);
+                exp_sum += p_inp_data[i];
+            }
+
+            if (exp_sum <= 0.0f || std::isnan(exp_sum)) {
+                std::fill(p_inp_data, p_inp_data + num_values, 1.0f / (float)num_values);
+                return;
+            }
+
+            for (int i = 0; i < num_values; ++i) {
+                p_inp_data[i] /= exp_sum;
             }
         }
 
@@ -81,14 +96,22 @@ namespace simple_conv {
     }
 
     std::vector<cv::Mat> generate_empty_layers(const std::vector<int> &shapes) {
-        using namespace std;
-        using namespace cv;
+        std::vector<cv::Mat> layers;
+        layers.reserve((shapes.size() - 1) * 2);
 
-        vector<Mat> layers((shapes.size() - 1) * 2);
+        for (size_t i = 0; i < shapes.size() - 1; ++i) {
+            int fan_in = shapes[i];
+            int fan_out = shapes[i+1];
+            float scale = sqrt(2.0f / (float)(fan_in + fan_out));
 
-        for (int i = 0; i < shapes.size() - 1; i++) {
-            layers[i * 2] = Mat(shapes[i + 1], shapes[i], CV_32F);
-            layers[i * 2 + 1] = Mat(shapes[i + 1], 1, CV_32F);
+            // Weights
+            cv::Mat weights(fan_out, fan_in, CV_32F);
+            cv::randn(weights, 0.0f, 1);
+            layers.push_back(weights);
+
+            // Biases
+            cv::Mat bias(fan_out, 1, CV_32F, cv::Scalar(0.0f));
+            layers.push_back(bias);
         }
 
         return layers;
@@ -133,7 +156,15 @@ namespace simple_conv {
                 cv::Mat diff = output - expected;
                 cv::Mat squared;
                 cv::pow(diff, 2, squared);
-                return static_cast<float>(cv::sum(squared)[0]) / (float)output.total();
+                float sum = (float)cv::sum(squared)[0];
+                return sum / (float)output.total();
+            }
+
+            float compute_loss_CE(const cv::Mat &output, const cv::Mat &expected) {
+                cv::Mat log_probs;
+                cv::log(output, log_probs);
+                cv::Mat loss_mat = expected.mul(log_probs);
+                return -cv::sum(loss_mat)[0];
             }
 
 
@@ -147,16 +178,16 @@ namespace simple_conv {
                 using namespace cv;
 
                 // hidden layer format is [a0, z1, a1, z2, a2,...]
-                int num_layers = net.size() / 2; // number of (W,b) pairs
+                int num_layers = (int)net.size() / 2; // number of (W,b) pairs
 
                 // Start with output layer
-                Mat aL = hidden_layers.back(); // activation of last layer
-                Mat zL = hidden_layers[hidden_layers.size() - 2].clone(); // pre-activation of last layer
+                const Mat& aL = hidden_layers.back(); // activation of last layer
+//                Mat zL = hidden_layers[hidden_layers.size() - 2].clone(); // pre-activation of last layer
 
                 // Output error
-                Mat delta = (aL - expected); // dC/da^L
-                sc_private::apply_inverse_sigmoid_derivative(zL);
-                delta = delta.mul(zL); // dC/dz^L
+                Mat delta = (aL - expected) / .5; // dC/da^L
+//                sc_private::apply_inverse_sigmoid_derivative(zL);
+//                delta = delta.mul(zL); // dC/dz^L
 
                 for (int l = num_layers - 1; l >= 0; --l) {
                     int weight_idx = l * 2;
@@ -178,14 +209,13 @@ namespace simple_conv {
                     db /= batch_size;
 
                     // Accumulate gradients
-                    gradient[weight_idx] += dW.t();
-                    gradient[bias_idx] += db.t();
+                    gradient[weight_idx] += dW;
+                    gradient[bias_idx] += db;
 
                     // Propagate error backward if not input layer
                     if (l > 0) {
-                        Mat W = net[weight_idx];
+                        const Mat& W = net[weight_idx];
                         delta = W.t() * delta; // Error for previous layer
-
                         // Get z from previous layer
                         Mat z_prev = hidden_layers[a_prev_idx - 1].clone();
                         sc_private::apply_inverse_sigmoid_derivative(z_prev);
@@ -203,8 +233,8 @@ namespace simple_conv {
                 for (int input_idx = 0; input_idx < input_batch.size(); input_idx++) {
                     std::vector<cv::Mat> hidden_layers;
                     forward_saving_layers(input_batch[input_idx], net, hidden_layers);
-                    avg_error += compute_loss_MSE(input_batch_expected[input_idx],
-                                                  hidden_layers[hidden_layers.size() - 1]);
+                    avg_error += compute_loss_CE(hidden_layers[hidden_layers.size() - 1],
+                                                  input_batch_expected[input_idx]);
                     apply_back_prob_for_gradient(net, input_batch_expected[input_idx], hidden_layers,
                                                  gradient, batch_size);
                 }
@@ -245,6 +275,7 @@ namespace simple_conv {
 
                     int label = static_cast<int>(row[0]);
                     cv::Mat img((int)row.size() - 1, 1, CV_8U, row.data() + 1);
+
                     img.convertTo(img, CV_32F, 1.0 / 255.0);
 
                     labels.push_back(label);
@@ -257,8 +288,8 @@ namespace simple_conv {
 
         } // learning_private
 
-        void apply_gradient_descend(std::vector<cv::Mat> &net, const boost::filesystem::path &dataset_path,bool show_progress, int batch_size, float trash_hold,
-                                    float epsilon, float grad_weight, int patience, float decay_factor) {
+        void apply_gradient_descend(std::vector<cv::Mat> &net, const boost::filesystem::path &dataset_path,bool show_progress, int batch_size,
+                                                float grad_weight, int patience, float decay_factor, float lambda) {
             using namespace std;
             using namespace cv;
 
@@ -268,10 +299,10 @@ namespace simple_conv {
             learning_private::load_dataset(dataset_path, inputs, labels);
 
             vector<Mat> current_batch(batch_size);
-            vector<Mat> current_expected(batch_size);
+            vector<Mat> current_expected(batch_size, Mat((int)net[net.size() - 1].total(), 1, CV_32F));
             vector<Mat> gradient(net.size());
             for(int i = 0; i < gradient.size(); i++){
-                gradient[i] = Mat(net[i].size[1], net[i].size[0], CV_32F);
+                gradient[i] = Mat(net[i].size[0], net[i].size[1], CV_32F);
             }
             float best_error = numeric_limits<float>::max();
             int stagnation_count = 0;
@@ -282,17 +313,18 @@ namespace simple_conv {
                 for(int i = 0; i < current_batch_size; i++){
                     current_batch[i] = inputs[batch_index + i];
                     int current_label = labels[batch_index + i];
-                    current_expected[i] = Mat((int)net[net.size() - 1].total(), 1, CV_32F);
+                    current_expected[i].setTo(0);
                     current_expected[i].at<float>(current_label) = 1.f;
                 }
                 for(auto& grad_layer : gradient){
-                    grad_layer = Mat::zeros(grad_layer.size(), grad_layer.type());
+                    grad_layer.setTo(0);
                 }
-                float current_error;
+                float current_error = 0;
                 learning_private::calculate_gradient(net, gradient, current_batch,
                                                      current_expected, current_error);
-                if (current_error < trash_hold){
-                    break;
+
+                if (show_progress){
+                    cout << "current batch: " << batch_index << "/" << inp_size << " current error: " << current_error << endl;
                 }
                 if(current_error < best_error){
                     stagnation_count = 0;
@@ -304,12 +336,13 @@ namespace simple_conv {
                         stagnation_count = 0;
                     }
                 }
-                for(int i = 0; i < net.size(); i++){
-                    net[i] -= gradient[i].t() * grad_weight;
-                }
-
-                if (show_progress){
-                    cout << "current batch: " << batch_index << "/" << inp_size << " current error: " << current_error << endl;
+                for(int i = 0; i < net.size(); i+=2){
+                    cv::threshold(gradient[i], gradient[i], 1e2, 1e2, cv::THRESH_TRUNC);
+                    cv::threshold(gradient[i], gradient[i], -1e2, -1e2, cv::THRESH_TOZERO);
+                    net[i] -= (gradient[i] + lambda * net[i]) * grad_weight;
+                    cv::threshold(gradient[i + 1], gradient[i + 1], 1e2, 1e2, cv::THRESH_TRUNC);
+                    cv::threshold(gradient[i  + 1], gradient[i  +1], -1e2, -1e2, cv::THRESH_TOZERO);
+                    net[i + 1] -= gradient[i + 1] * grad_weight;
                 }
             }
         }
@@ -325,14 +358,9 @@ namespace simple_conv {
                 throw std::exception();
             }
 
-            Mat img = imread(path.c_str());
-            if (img.type() == CV_8UC3) {
-                cv::cvtColor(img, img, cv::COLOR_BGR2GRAY);
-                img.convertTo(img, CV_32F, 1.0 / 255.0);
-            } else {
-                std::cerr << "got unsupportable image type (U8 gray or rgba)" << std::endl;
-                throw std::exception();
-            }
+            Mat img = imread(path.c_str(), CV_8U);
+            img.convertTo(img, CV_32F, 1.0 / 255.0);
+            img = 1.0 - img;
 
             img = img.reshape(1, (int) img.total());
 

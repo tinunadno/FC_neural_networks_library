@@ -13,11 +13,14 @@ namespace simple_conv {
     std::vector<cv::Mat> generate_empty_layers(const std::vector<int> &shapes);
 
     namespace learning {
+
         void apply_gradient_descend(std::vector<cv::Mat> &net, const boost::filesystem::path &dataset_path,
                                     bool show_progress = false,
-                                    int batch_size = 32, float trash_hold = .05f,
-                                    float epsilon = 10e-5f, float grad_weight = .5f, int patience = 10,
-                                    float decay_factor = .5f);
+                                    int batch_size = 32,
+                                    float grad_weight = .005f,
+                                    int patience = 10,
+                                    float decay_factor = .1f,
+                                    float lambda = .01f);
     }
 
     namespace io {
