@@ -16,9 +16,9 @@ namespace simple_conv {
         void apply_gradient_descend(std::vector<cv::Mat> &net, const boost::filesystem::path &dataset_path,
                                     bool show_progress = false,
                                     float grad_weight = .1f,
-                                    int epoch_ = 10,
+                                    int epoch_ = 100,
                                     int dev_size = 1000,
-                                    int sample_size = -1);
+                                    int sample_size = 4);
     }
 
     namespace io {

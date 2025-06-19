@@ -122,37 +122,45 @@ namespace simple_conv {
     namespace learning {
 
         namespace learning_private {
+            struct learning_resources{
+                std::vector<cv::Mat>& net;
+                cv::Mat dev_labels, dev_inputs, train_labels, train_inputs;
+                cv::Mat one_hot;
+                std::vector<cv::Mat> hidden_layers, dev_hidden_layers, gradient;
+            };
 
-            void apply_soft_max(cv::Mat& mat){
-                int cols = mat.cols;
-                int rows = mat.rows;
-                bool is_c = mat.isContinuous();
-                for(int i  = 0; i < cols; i++){
+            void apply_soft_max(cv::Mat& src, cv::Mat& dst){
+                if (dst.empty()){
+                    dst = cv::Mat(src.size(), src.type());
+                }
+                CV_Assert(src.cols == dst.cols);
+                CV_Assert(src.rows == dst.rows);
+                for(int col  = 0; col < src.cols; col++){
 
                     float max_val = -std::numeric_limits<float>::max();
 
-                    for(int j = 0; j < rows; j++){
-                        float val = mat.at<float>(j, i);
+                    for(int row = 0; row < src.rows; row++){
+                        float val = src.at<float>(row, col);
                         if(val > max_val){
                             max_val = val;
                         }
                     }
 
                     float exp_sum = 0.f;
-                    for(int j = 0; j < rows; j++){
-                        float exp_val = sc_private::safe_exp(mat.at<float>(j, i) - max_val);
+                    for(int row = 0; row < src.rows; row++){
+                        float exp_val = sc_private::safe_exp(src.at<float>(row, col) - max_val);
                         exp_sum += exp_val;
                     }
 
                     if(exp_sum <= 1e-6 || std::isnan(exp_sum)){
-                        float uniform = 1.f / static_cast<float>(rows);
-                        for(int j = 0; j < rows; j++){
-                            mat.at<float>(j, i) *= uniform;
+                        float uniform = 1.f / static_cast<float>(src.rows);
+                        for(int row = 0; row < src.rows; row++){
+                            dst.at<float>(row, col) = uniform * src.at<float>(row, col);
                         }
                     }else{
-                        for(int j = 0; j < rows; j++){
-                            float exp_val = sc_private::safe_exp(mat.at<float>(j, i) - max_val);
-                            mat.at<float>(j, i) = exp_val / exp_sum;
+                        for(int row = 0; row < src.rows; row++){
+                            float exp_val = sc_private::safe_exp(src.at<float>(row, col) - max_val);
+                            dst.at<float>(row, col) = exp_val / exp_sum;
                         }
                     }
                 }
@@ -166,23 +174,40 @@ namespace simple_conv {
                 }
             }
 
-            // PS I've repeated here, cuz I don't want to overcomplicate basic forward_with_layers interface
+
+//            Mat z1;
+//            gemm(net[0], input_layer, 1, cv::Mat(), 0, z1);
+//            broadcast_column_addition(z1, net[1]);
+//            Mat a1;
+//            threshold(z1, a1, 0.0, 0.0, THRESH_TOZERO);
+//            Mat z2;
+//            gemm(net[2], a1, 1, cv::Mat(), 0, z2);
+//            broadcast_column_addition(z2, net[3]);
+//            Mat a2 = z2.clone();
+//            learning_private::apply_soft_max(a2);
+//            hidden_layers = {z1, a1, z2, a2};
             void forward_propagation(const cv::Mat &input_layer, const std::vector<cv::Mat> &net,
                                      std::vector<cv::Mat> &hidden_layers) {
                 using namespace cv;
 
-                Mat z1;
-                gemm(net[0], input_layer, 1, cv::Mat(), 0, z1);
-                broadcast_column_addition(z1, net[1]);
-                Mat a1;
-                threshold(z1, a1, 0.0, 0.0, THRESH_TOZERO);
-                Mat z2;
-                gemm(net[2], a1, 1, cv::Mat(), 0, z2);
-                broadcast_column_addition(z2, net[3]);
-                Mat a2 = z2.clone();
-                learning_private::apply_soft_max(a2);
-                hidden_layers = {z1, a1, z2, a2};
+                gemm(net[0], input_layer, 1, cv::Mat(), 0, hidden_layers[0]);
+                broadcast_column_addition(hidden_layers[0], net[1]);
+                threshold(hidden_layers[0], hidden_layers[1], 0.0, 0.0, THRESH_TOZERO);
+                for(int i = 2; i < net.size(); i+=2){
+                    gemm(net[i], hidden_layers[i - 1], 1, cv::Mat(), 0, hidden_layers[i]);
+                    broadcast_column_addition(hidden_layers[i], net[i + 1]);
+                    if(i + 2 >= net.size()){
+                        learning_private::apply_soft_max(hidden_layers[i], hidden_layers[i + 1]);
+                    }else {
+                        threshold(hidden_layers[i], hidden_layers[i + 1], 0.0, 0.0, THRESH_TOZERO);
+                    }
+                }
 
+            }
+
+            void forward_propagation(learning_resources& ls) {
+                using namespace cv;
+                forward_propagation(ls.train_inputs, ls.net, ls.hidden_layers);
             }
 
             void one_hot(const cv::Mat& labels, cv::Mat& one_hot_mtx, int classes_count){
@@ -193,34 +218,33 @@ namespace simple_conv {
                 }
             }
 
-            void backward_propagation(const std::vector<cv::Mat>& net, const std::vector<cv::Mat>& hidden_layers,
-                                      const cv::Mat& inputs, const cv::Mat& one_hot, std::vector<cv::Mat>& gradient){
+            void backward_propagation(learning_resources& ls){
                 using namespace cv;
                 Mat dz2;
-                add(hidden_layers[3], -one_hot, dz2);
+                add(ls.hidden_layers[3], -ls.one_hot, dz2);
                 Mat dw2;
-                gemm(dz2, hidden_layers[1], 1./inputs.cols, cv::Mat(), 0, dw2, GEMM_2_T);
+                gemm(dz2, ls.hidden_layers[1], 1./ls.train_inputs.cols, cv::Mat(), 0, dw2, GEMM_2_T);
                 Mat db2;
                 reduce(dz2, db2, 1, REDUCE_SUM, CV_32F);
-                db2 /= inputs.cols;
+                db2 /= ls.train_inputs.cols;
                 Mat dz1;
-                gemm(net[2], dz2, 1., cv::Mat(), 0, dz1, GEMM_1_T);
+                gemm(ls.net[2], dz2, 1., cv::Mat(), 0, dz1, GEMM_1_T);
                 Mat relu_der;
-                compare(hidden_layers[0], cv::Scalar(0), relu_der, CMP_GT);
+                compare(ls.hidden_layers[0], cv::Scalar(0), relu_der, CMP_GT);
                 relu_der.convertTo(relu_der, CV_32F, 1./255);
                 multiply(dz1, relu_der, dz1);
 //                dz1 *= relu_der;
                 Mat dw1;
-                gemm(dz1, inputs, 1./inputs.cols, cv::Mat(), 0, dw1, GEMM_2_T);
+                gemm(dz1, ls.train_inputs, 1./ls.train_inputs.cols, cv::Mat(), 0, dw1, GEMM_2_T);
                 Mat db1;
                 reduce(dz1, db1, 1, REDUCE_SUM, CV_32F);
-                db1 /= inputs.cols;
-                gradient = {dw1, db1, dw2, db2};
+                db1 /= ls.train_inputs.cols;
+                ls.gradient = {dw1, db1, dw2, db2};
             }
 
-            void update_params(const std::vector<cv::Mat>& net, std::vector<cv::Mat>& gradient, float grad_weight){
-                for(int i = 0; i < (int)net.size(); i++){
-                    net[i] -= grad_weight * gradient[i];
+            void update_params(learning_resources& ls, float grad_weight){
+                for(int i = 0; i < (int)ls.net.size(); i++){
+                    ls.net[i] -= grad_weight * ls.gradient[i];
                 }
             }
 
@@ -330,20 +354,50 @@ namespace simple_conv {
 
                 return mat;
             }
+//            struct learning_resources{
+//                std::vector<cv::Mat>& net;
+//                cv::Mat dev_labels, dev_inputs, train_labels, train_inputs;
+//                std::vector<cv::Mat> hidden_layers, gradient;
+//            };
+            learning_resources initialize_resources(std::vector<cv::Mat>& net, const boost::filesystem::path& dataset_path, int dev_size){
+                using namespace cv;
+                using namespace std;
+                Mat data = learning_private::load_dataset(dataset_path);
 
-            void show_accuracy_sample(const std::vector<cv::Mat>& net, const cv::Mat& inputs, const cv::Mat& labels, int sample_size){
+                Mat dev_set = data(cv::Range::all(), cv::Range(0, dev_size));
+                Mat train_set = data(cv::Range::all(), cv::Range(dev_size, data.cols));
+
+                Mat dev_labels = dev_set.row(0);
+                Mat dev_inputs = dev_set.rowRange(1, data.rows) / 255.f;
+
+                Mat train_labels = train_set.row(0);
+                Mat train_inputs = train_set.rowRange(1, data.rows) / 255.f;
+
+                Mat one_hot;
+                learning_private::one_hot(train_labels, one_hot, (net[net.size() - 1]).rows);
+
+                vector<Mat> hidden_layers(net.size());
+                vector<Mat> dev_hidden_layers(net.size());
+                vector<Mat> gradient(net.size());
+                for(int i = 0; i < net.size() - 1; i+=2){
+                    hidden_layers[i] = Mat(net[i+1].rows, train_inputs.cols, CV_32F);
+                    hidden_layers[i + 1] = Mat(net[i+1].rows, train_inputs.cols, CV_32F);
+                    dev_hidden_layers[i] = Mat(net[i+1].rows, dev_inputs.cols, CV_32F);
+                    dev_hidden_layers[i + 1] = Mat(net[i+1].rows, dev_inputs.cols, CV_32F);
+                    gradient[i] = Mat(net[i].size(), CV_32F);
+                    gradient[i + 1] = Mat(net[i + 1].size(), CV_32F);
+                }
+
+                return {net, dev_labels, dev_inputs, train_labels, train_inputs, one_hot, hidden_layers, dev_hidden_layers, gradient};
+            }
+
+            void show_accuracy_sample(const learning_resources& ls, int sample_size){
                 using namespace cv;
 
-
-
-                cv::Mat sample = inputs.colRange(cv::Range(0, sample_size));
-
+                cv::Mat sample = ls.dev_inputs.colRange(cv::Range(0, sample_size));
                 std::vector<Mat> hidden;
-
-                learning_private::forward_propagation(sample, net, hidden);
-
+                learning_private::forward_propagation(sample, ls.net, hidden);
                 cv::Mat predictions;
-
                 get_predictions(hidden[hidden.size() - 1], predictions);
 
                 int img_size = (int)sqrt(sample.rows);
@@ -352,7 +406,8 @@ namespace simple_conv {
                     img = img.reshape(1, {img_size, img_size});
                     compare(img, cv::Scalar(0), img, CMP_GT);
                     resize(img, img, Size(700, 700), INTER_LINEAR);
-                    imshow("label: " + std::to_string(labels.at<float>(i)) + " prediction: "+ std::to_string(predictions.at<float>(i)), img);
+                    imshow("label: " + std::to_string(ls.dev_labels.at<float>(i)) + " prediction: "
+                    + std::to_string(predictions.at<float>(i)), img);
                     waitKey(0);
                 }
             }
@@ -364,38 +419,23 @@ namespace simple_conv {
             using namespace std;
             using namespace cv;
 
-            Mat data = learning_private::load_dataset(dataset_path);
-
-            Mat dev_set = data(cv::Range::all(), cv::Range(0, dev_size));
-            Mat train_set = data(cv::Range::all(), cv::Range(dev_size, data.cols));
-
-            Mat dev_labels = dev_set.row(0);
-            Mat dev_inputs = dev_set.rowRange(1, data.rows) / 255.f;
-
-            Mat train_labels = train_set.row(0);
-            Mat train_inputs = train_set.rowRange(1, data.rows) / 255.f;
-
-            Mat one_hot;
-            learning_private::one_hot(train_labels, one_hot, (net[net.size() - 1]).rows);
+            auto ls = learning_private::initialize_resources(net, dataset_path, dev_size);
 
             for(int i = 0; i < epoch_; i++){
-                vector<Mat> hidden_layers;
-                learning_private::forward_propagation(train_inputs, net, hidden_layers);
-                vector<Mat> gradient;
-                learning_private::backward_propagation(net, hidden_layers, train_inputs, one_hot, gradient);
-                learning_private::update_params(net, gradient, grad_weight);
+                learning_private::forward_propagation(ls);
+                learning_private::backward_propagation(ls);
+                learning_private::update_params(ls, grad_weight);
                 if(i % 10 == 0 && show_progress){
-                    cout << "EPOCH: " << i << endl;
-                    vector<Mat> dev_hidden_layers;
-                    learning_private::forward_propagation(dev_inputs, net, dev_hidden_layers);
+                    learning_private::forward_propagation(ls.dev_inputs, net, ls.dev_hidden_layers);
                     cv::Mat predictions;
-                    learning_private::get_predictions(dev_hidden_layers[dev_hidden_layers.size() - 1], predictions);
-                    float accuracy = learning_private::get_accuracy(dev_labels, predictions);
+                    learning_private::get_predictions(ls.dev_hidden_layers[ls.dev_hidden_layers.size() - 1], predictions);
+                    float accuracy = learning_private::get_accuracy(ls.dev_labels, predictions);
+                    cout << "EPOCH: " << i << endl;
                     cout << "ACCURACY: " << accuracy << "%" << endl;
                 }
             }
             if(sample_size > 0){
-                learning_private::show_accuracy_sample(net, dev_inputs, dev_labels, sample_size);
+                learning_private::show_accuracy_sample(ls, sample_size);
             }
         }
     } // learning
