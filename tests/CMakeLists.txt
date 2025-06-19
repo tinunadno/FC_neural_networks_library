@@ -4,7 +4,6 @@ project(conv_lib_test)
 set(CMAKE_CXX_STANDARD 20)
 
 find_package(GTest REQUIRED)
-find_package(OpenCV REQUIRED)
 
 add_subdirectory(../ lib_conv_build)
 
@@ -17,7 +16,6 @@ include_directories(${PROJECT_SOURCE_DIR}/..)
 target_link_libraries(conv_lib_test PRIVATE
         conv_lib
         GTest::GTest
-        ${OpenCV_LIBS}
 )
 
 enable_testing()

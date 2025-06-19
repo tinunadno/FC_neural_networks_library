@@ -1,5 +1,7 @@
 
 #include <fstream>
+#include <sys/mman.h>
+#include <fcntl.h>
 #include "simple_conv.h"
 
 namespace simple_conv {
@@ -29,8 +31,8 @@ namespace simple_conv {
         }
 
         inline void apply_soft_max(cv::Mat &processing_layer, float temperature = .5f) {
-            auto *p_inp_data = (float *)processing_layer.data;
-            const int num_values = (int)processing_layer.total();
+            auto *p_inp_data = (float *) processing_layer.data;
+            const int num_values = (int) processing_layer.total();
 
             if (num_values == 0 || temperature <= 0.0f || std::isnan(temperature)) {
                 return; // избегаем деления на ноль или nan'ов
@@ -50,7 +52,7 @@ namespace simple_conv {
             }
 
             if (exp_sum <= 0.0f || std::isnan(exp_sum)) {
-                std::fill(p_inp_data, p_inp_data + num_values, 1.0f / (float)num_values);
+                std::fill(p_inp_data, p_inp_data + num_values, 1.0f / (float) num_values);
                 return;
             }
 
@@ -101,16 +103,16 @@ namespace simple_conv {
 
         for (size_t i = 0; i < shapes.size() - 1; ++i) {
             int fan_in = shapes[i];
-            int fan_out = shapes[i+1];
-            float scale = sqrt(2.0f / (float)(fan_in + fan_out));
+            int fan_out = shapes[i + 1];
 
             // Weights
             cv::Mat weights(fan_out, fan_in, CV_32F);
-            cv::randn(weights, 0.0f, 1);
+            cv::randu(weights, -.5f, .5f);
             layers.push_back(weights);
 
             // Biases
-            cv::Mat bias(fan_out, 1, CV_32F, cv::Scalar(0.0f));
+            cv::Mat bias(fan_out, 1, CV_32F);
+            cv::randu(bias, -.5f, .5f);
             layers.push_back(bias);
         }
 
@@ -121,229 +123,279 @@ namespace simple_conv {
 
         namespace learning_private {
 
+            void apply_soft_max(cv::Mat& mat){
+                int cols = mat.cols;
+                int rows = mat.rows;
+                bool is_c = mat.isContinuous();
+                for(int i  = 0; i < cols; i++){
+
+                    float max_val = -std::numeric_limits<float>::max();
+
+                    for(int j = 0; j < rows; j++){
+                        float val = mat.at<float>(j, i);
+                        if(val > max_val){
+                            max_val = val;
+                        }
+                    }
+
+                    float exp_sum = 0.f;
+                    for(int j = 0; j < rows; j++){
+                        float exp_val = sc_private::safe_exp(mat.at<float>(j, i) - max_val);
+                        exp_sum += exp_val;
+                    }
+
+                    if(exp_sum <= 1e-6 || std::isnan(exp_sum)){
+                        float uniform = 1.f / static_cast<float>(rows);
+                        for(int j = 0; j < rows; j++){
+                            mat.at<float>(j, i) *= uniform;
+                        }
+                    }else{
+                        for(int j = 0; j < rows; j++){
+                            float exp_val = sc_private::safe_exp(mat.at<float>(j, i) - max_val);
+                            mat.at<float>(j, i) = exp_val / exp_sum;
+                        }
+                    }
+                }
+            }
+
+            void broadcast_column_addition(cv::Mat& add_it_to_me, const cv::Mat& column_vec){
+                for(int col = 0; col < add_it_to_me.cols; col++){
+                    for(int row = 0; row < add_it_to_me.rows; row++){
+                        add_it_to_me.at<float>(row, col) += column_vec.at<float>(row);
+                    }
+                }
+            }
+
             // PS I've repeated here, cuz I don't want to overcomplicate basic forward_with_layers interface
-            void forward_saving_layers(const cv::Mat &input_layer, const std::vector<cv::Mat> &net,
-                                       std::vector<cv::Mat> &hidden_layers) {
+            void forward_propagation(const cv::Mat &input_layer, const std::vector<cv::Mat> &net,
+                                     std::vector<cv::Mat> &hidden_layers) {
                 using namespace cv;
 
-                assert(input_layer.type() == CV_32F);
+                Mat z1;
+                gemm(net[0], input_layer, 1, cv::Mat(), 0, z1);
+                broadcast_column_addition(z1, net[1]);
+                Mat a1;
+                threshold(z1, a1, 0.0, 0.0, THRESH_TOZERO);
+                Mat z2;
+                gemm(net[2], a1, 1, cv::Mat(), 0, z2);
+                broadcast_column_addition(z2, net[3]);
+                Mat a2 = z2.clone();
+                learning_private::apply_soft_max(a2);
+                hidden_layers = {z1, a1, z2, a2};
 
-                Mat processing_layer = input_layer;
+            }
 
-                hidden_layers.push_back(processing_layer);
-
-                for (size_t layer_idx = 0; layer_idx < net.size(); layer_idx += 2) {
-                    const auto &weights = net[layer_idx];
-                    const auto &bias = net[layer_idx + 1];
-
-                    assert(weights.type() == CV_32F);
-                    assert(bias.type() == CV_32F);
-
-                    // opencv will deal with bad Matrix shapes
-                    processing_layer = weights * processing_layer;
-                    processing_layer += bias;
-                    hidden_layers.push_back(processing_layer.clone());
-                    if (layer_idx + 2 >= net.size()) {
-                        sc_private::apply_soft_max(processing_layer);
-                    } else {
-                        sc_private::apply_sigmoid(processing_layer);
-                    }
-                    hidden_layers.push_back(processing_layer.clone());
+            void one_hot(const cv::Mat& labels, cv::Mat& one_hot_mtx, int classes_count){
+                one_hot_mtx = cv::Mat::zeros(classes_count, labels.cols, CV_32F);
+                for(int i = 0; i < labels.cols; i++){
+                    float label_idx = labels.at<float>(0, i);
+                    one_hot_mtx.at<float>(static_cast<int>(label_idx), i) = 1.f;
                 }
             }
 
-            float compute_loss_MSE(const cv::Mat &output, const cv::Mat &expected) {
-                cv::Mat diff = output - expected;
-                cv::Mat squared;
-                cv::pow(diff, 2, squared);
-                float sum = (float)cv::sum(squared)[0];
-                return sum / (float)output.total();
-            }
-
-            float compute_loss_CE(const cv::Mat &output, const cv::Mat &expected) {
-                cv::Mat log_probs;
-                cv::log(output, log_probs);
-                cv::Mat loss_mat = expected.mul(log_probs);
-                return -cv::sum(loss_mat)[0];
-            }
-
-
-            void apply_back_prob_for_gradient(
-                    const std::vector<cv::Mat> &net,
-                    const cv::Mat &expected,
-                    const std::vector<cv::Mat> &hidden_layers,
-                    std::vector<cv::Mat> &gradient,
-                    int batch_size)
-            {
+            void backward_propagation(const std::vector<cv::Mat>& net, const std::vector<cv::Mat>& hidden_layers,
+                                      const cv::Mat& inputs, const cv::Mat& one_hot, std::vector<cv::Mat>& gradient){
                 using namespace cv;
+                Mat dz2;
+                add(hidden_layers[3], -one_hot, dz2);
+                Mat dw2;
+                gemm(dz2, hidden_layers[1], 1./inputs.cols, cv::Mat(), 0, dw2, GEMM_2_T);
+                Mat db2;
+                reduce(dz2, db2, 1, REDUCE_SUM, CV_32F);
+                db2 /= inputs.cols;
+                Mat dz1;
+                gemm(net[2], dz2, 1., cv::Mat(), 0, dz1, GEMM_1_T);
+                Mat relu_der;
+                compare(hidden_layers[0], cv::Scalar(0), relu_der, CMP_GT);
+                relu_der.convertTo(relu_der, CV_32F, 1./255);
+                multiply(dz1, relu_der, dz1);
+//                dz1 *= relu_der;
+                Mat dw1;
+                gemm(dz1, inputs, 1./inputs.cols, cv::Mat(), 0, dw1, GEMM_2_T);
+                Mat db1;
+                reduce(dz1, db1, 1, REDUCE_SUM, CV_32F);
+                db1 /= inputs.cols;
+                gradient = {dw1, db1, dw2, db2};
+            }
 
-                // hidden layer format is [a0, z1, a1, z2, a2,...]
-                int num_layers = (int)net.size() / 2; // number of (W,b) pairs
-
-                // Start with output layer
-                const Mat& aL = hidden_layers.back(); // activation of last layer
-//                Mat zL = hidden_layers[hidden_layers.size() - 2].clone(); // pre-activation of last layer
-
-                // Output error
-                Mat delta = (aL - expected) / .5; // dC/da^L
-//                sc_private::apply_inverse_sigmoid_derivative(zL);
-//                delta = delta.mul(zL); // dC/dz^L
-
-                for (int l = num_layers - 1; l >= 0; --l) {
-                    int weight_idx = l * 2;
-                    int bias_idx = weight_idx + 1;
-
-                    // Get activation from previous layer
-                    int a_prev_idx = l * 2;
-                    Mat a_prev = hidden_layers[a_prev_idx];
-                    if (a_prev.cols > 1) { // if it's row vector, transpose
-                        a_prev = a_prev.t();
-                    }
-
-                    // Compute gradients
-                    Mat dW = delta * a_prev.t(); // dC/dW^l
-                    Mat db = delta.clone(); // dC/db^l
-
-                    // Normalize by batch size
-                    dW /= batch_size;
-                    db /= batch_size;
-
-                    // Accumulate gradients
-                    gradient[weight_idx] += dW;
-                    gradient[bias_idx] += db;
-
-                    // Propagate error backward if not input layer
-                    if (l > 0) {
-                        const Mat& W = net[weight_idx];
-                        delta = W.t() * delta; // Error for previous layer
-                        // Get z from previous layer
-                        Mat z_prev = hidden_layers[a_prev_idx - 1].clone();
-                        sc_private::apply_inverse_sigmoid_derivative(z_prev);
-
-                        delta = delta.mul(z_prev); // updating delta
-                    }
+            void update_params(const std::vector<cv::Mat>& net, std::vector<cv::Mat>& gradient, float grad_weight){
+                for(int i = 0; i < (int)net.size(); i++){
+                    net[i] -= grad_weight * gradient[i];
                 }
             }
 
-            void calculate_gradient(const std::vector<cv::Mat> &net, std::vector<cv::Mat> &gradient,
-                                    const std::vector<cv::Mat> &input_batch,
-                                    const std::vector<cv::Mat> &input_batch_expected,
-                                    float& avg_error) {
-                int batch_size = (int) input_batch.size();
-                for (int input_idx = 0; input_idx < input_batch.size(); input_idx++) {
-                    std::vector<cv::Mat> hidden_layers;
-                    forward_saving_layers(input_batch[input_idx], net, hidden_layers);
-                    avg_error += compute_loss_CE(hidden_layers[hidden_layers.size() - 1],
-                                                  input_batch_expected[input_idx]);
-                    apply_back_prob_for_gradient(net, input_batch_expected[input_idx], hidden_layers,
-                                                 gradient, batch_size);
+            void get_predictions(const cv::Mat& last_layer, cv::Mat& predictions){
+                predictions = cv::Mat(1, last_layer.cols, CV_32F);
+                for(int i = 0; i < last_layer.cols; i++){
+                    float max_val = last_layer.at<float>(0, i);
+                    int best_idx = 0;
+                    for(int j = 0; j < last_layer.rows; j++){
+                        float val = last_layer.at<float>(j, i);
+                        if(val > max_val){
+                            max_val = val;
+                            best_idx = j;
+                        }
+                    }
+                    predictions.at<float>(0, i) = (float)best_idx;
                 }
-                avg_error /= (float) batch_size;
             }
 
-            //! this thing is for csv only!
-            void load_dataset(const boost::filesystem::path& path, std::vector<cv::Mat>& inputs, std::vector<int>& labels) {
-                using namespace std;
+            float get_accuracy(const cv::Mat& labels, const cv::Mat& predictions){
+                int matches = 0;
+                for(int i = 0; i < labels.cols; i++){
+                    matches += abs(labels.at<float>(0, i) - predictions.at<float>(0, i)) < 1e-6;
+                }
+                return (float)matches / (float)labels.cols * 100;
+            }
 
-                if(!exists(path)){
-                    cerr << "File doesn't exists: " << path.c_str() << endl;
-                    throw exception();
+            //!!! YOU MUST MANUALLY FREE DATASET DATA
+            cv::Mat load_dataset(const boost::filesystem::path &filename, char delimiter = ',', bool has_header = true) {
+
+                if(!exists(filename)){
+                    std::cerr << "Dataset path doesn't exists!" << std::endl;
+                    throw std::exception();
+                }
+                int fd = open(filename.c_str(), O_RDONLY);
+                if (fd == -1) {
+                    throw std::runtime_error("Failed to open file: " + filename.string() + ", error: " + strerror(errno));
                 }
 
-                ifstream file(path);
-                if (!file.is_open()) {
-                    cerr << "Failed to open file: " << path << endl;
-                    throw exception();
+                off_t size = lseek(fd, 0, SEEK_END);
+                if (size <= 0) {
+                    close(fd);
+                    throw std::runtime_error("File is empty or invalid: " + filename.string());
                 }
 
-                string line;
+                void *data = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
+                close(fd);
+                if (data == MAP_FAILED) {
+                    throw std::runtime_error("Failed to mmap file: " + filename.string() + ", error: " + strerror(errno));
+                }
+
+                const char *buffer = static_cast<const char *>(data);
+                const char *end = buffer + size;
+
+                if (has_header) {
+                    const char *line_end = static_cast<const char *>(memchr(buffer, '\n', end - buffer));
+                    if (!line_end) {
+                        munmap(data, size);
+                        throw std::runtime_error("No newline found in file.");
+                    }
+                    buffer = line_end + 1;
+                }
+
+                size_t num_rows = 0;
+                size_t num_cols = 0;
+                const char *ptr = buffer;
                 bool first_line = true;
 
-                while (getline(file, line)) {
-                    if (first_line) {
+                while (ptr <= end) {
+                    if (*ptr == delimiter) {
+                        if (first_line) {
+                            num_cols++;
+                        }
+                    } else if (*ptr == '\n') {
+                        num_rows++;
+                        if(first_line){
+                            num_cols++;
+                        }
                         first_line = false;
-                        continue;
                     }
-
-                    stringstream ss(line);
-                    string item;
-                    vector<uint8_t> row;
-
-                    while (getline(ss, item, ',')) {
-                        row.push_back(stoi(item));
-                    }
-
-                    int label = static_cast<int>(row[0]);
-                    cv::Mat img((int)row.size() - 1, 1, CV_8U, row.data() + 1);
-
-                    img.convertTo(img, CV_32F, 1.0 / 255.0);
-
-                    labels.push_back(label);
-                    inputs.push_back(img.clone());
+                    ptr++;
                 }
-                file.close();
 
-                cout << "Loaded " << inputs.size() << " inputs" << endl;
+                size_t total = num_rows * num_cols;
+
+                auto *mat_data = static_cast<float*>(malloc((total) * sizeof(float)));
+                float *mat_data_ptr = mat_data;
+                if(mat_data == nullptr){
+                    munmap(data, size);
+                    throw std::runtime_error("bad alloc!");
+                }
+
+                ptr = buffer;
+
+                for(size_t i = 0; i < total; i++){
+                    char* end_ptr;
+                    float val = strtof(ptr, &end_ptr);
+                    *(mat_data_ptr++) = val;
+                    ptr = end_ptr + 1;
+                }
+
+                cv::Mat mat((int)num_rows, (int)num_cols, CV_32F, mat_data);
+
+                munmap(data, size);
+
+                cv::transpose(mat, mat);
+
+                return mat;
+            }
+
+            void show_accuracy_sample(const std::vector<cv::Mat>& net, const cv::Mat& inputs, const cv::Mat& labels, int sample_size){
+                using namespace cv;
+
+
+
+                cv::Mat sample = inputs.colRange(cv::Range(0, sample_size));
+
+                std::vector<Mat> hidden;
+
+                learning_private::forward_propagation(sample, net, hidden);
+
+                cv::Mat predictions;
+
+                get_predictions(hidden[hidden.size() - 1], predictions);
+
+                int img_size = (int)sqrt(sample.rows);
+                for(int i = 0; i < sample_size; i++){
+                    Mat img = sample.col(i).clone();
+                    img = img.reshape(1, {img_size, img_size});
+                    compare(img, cv::Scalar(0), img, CMP_GT);
+                    resize(img, img, Size(700, 700), INTER_LINEAR);
+                    imshow("label: " + std::to_string(labels.at<float>(i)) + " prediction: "+ std::to_string(predictions.at<float>(i)), img);
+                    waitKey(0);
+                }
             }
 
         } // learning_private
 
-        void apply_gradient_descend(std::vector<cv::Mat> &net, const boost::filesystem::path &dataset_path,bool show_progress, int batch_size,
-                                                float grad_weight, int patience, float decay_factor, float lambda) {
+        void apply_gradient_descend(std::vector<cv::Mat> &net, const boost::filesystem::path &dataset_path,
+                                    bool show_progress, float grad_weight, int epoch_, int dev_size, int sample_size) {
             using namespace std;
             using namespace cv;
 
-            vector<Mat> inputs;
-            vector<int> labels;
+            Mat data = learning_private::load_dataset(dataset_path);
 
-            learning_private::load_dataset(dataset_path, inputs, labels);
+            Mat dev_set = data(cv::Range::all(), cv::Range(0, dev_size));
+            Mat train_set = data(cv::Range::all(), cv::Range(dev_size, data.cols));
 
-            vector<Mat> current_batch(batch_size);
-            vector<Mat> current_expected(batch_size, Mat((int)net[net.size() - 1].total(), 1, CV_32F));
-            vector<Mat> gradient(net.size());
-            for(int i = 0; i < gradient.size(); i++){
-                gradient[i] = Mat(net[i].size[0], net[i].size[1], CV_32F);
+            Mat dev_labels = dev_set.row(0);
+            Mat dev_inputs = dev_set.rowRange(1, data.rows) / 255.f;
+
+            Mat train_labels = train_set.row(0);
+            Mat train_inputs = train_set.rowRange(1, data.rows) / 255.f;
+
+            Mat one_hot;
+            learning_private::one_hot(train_labels, one_hot, (net[net.size() - 1]).rows);
+
+            for(int i = 0; i < epoch_; i++){
+                vector<Mat> hidden_layers;
+                learning_private::forward_propagation(train_inputs, net, hidden_layers);
+                vector<Mat> gradient;
+                learning_private::backward_propagation(net, hidden_layers, train_inputs, one_hot, gradient);
+                learning_private::update_params(net, gradient, grad_weight);
+                if(i % 10 == 0 && show_progress){
+                    cout << "EPOCH: " << i << endl;
+                    vector<Mat> dev_hidden_layers;
+                    learning_private::forward_propagation(dev_inputs, net, dev_hidden_layers);
+                    cv::Mat predictions;
+                    learning_private::get_predictions(dev_hidden_layers[dev_hidden_layers.size() - 1], predictions);
+                    float accuracy = learning_private::get_accuracy(dev_labels, predictions);
+                    cout << "ACCURACY: " << accuracy << "%" << endl;
+                }
             }
-            float best_error = numeric_limits<float>::max();
-            int stagnation_count = 0;
-
-            size_t inp_size = inputs.size();
-            for(size_t batch_index = 0; batch_index < inp_size; batch_index += batch_size){
-                int current_batch_size = (int)(batch_size < inp_size - batch_index ? batch_size: inp_size - batch_index);
-                for(int i = 0; i < current_batch_size; i++){
-                    current_batch[i] = inputs[batch_index + i];
-                    int current_label = labels[batch_index + i];
-                    current_expected[i].setTo(0);
-                    current_expected[i].at<float>(current_label) = 1.f;
-                }
-                for(auto& grad_layer : gradient){
-                    grad_layer.setTo(0);
-                }
-                float current_error = 0;
-                learning_private::calculate_gradient(net, gradient, current_batch,
-                                                     current_expected, current_error);
-
-                if (show_progress){
-                    cout << "current batch: " << batch_index << "/" << inp_size << " current error: " << current_error << endl;
-                }
-                if(current_error < best_error){
-                    stagnation_count = 0;
-                    best_error = current_error;
-                }else{
-                    stagnation_count++;
-                    if(stagnation_count > patience){
-                        grad_weight *= decay_factor;
-                        stagnation_count = 0;
-                    }
-                }
-                for(int i = 0; i < net.size(); i+=2){
-                    cv::threshold(gradient[i], gradient[i], 1e2, 1e2, cv::THRESH_TRUNC);
-                    cv::threshold(gradient[i], gradient[i], -1e2, -1e2, cv::THRESH_TOZERO);
-                    net[i] -= (gradient[i] + lambda * net[i]) * grad_weight;
-                    cv::threshold(gradient[i + 1], gradient[i + 1], 1e2, 1e2, cv::THRESH_TRUNC);
-                    cv::threshold(gradient[i  + 1], gradient[i  +1], -1e2, -1e2, cv::THRESH_TOZERO);
-                    net[i + 1] -= gradient[i + 1] * grad_weight;
-                }
+            if(sample_size > 0){
+                learning_private::show_accuracy_sample(net, dev_inputs, dev_labels, sample_size);
             }
         }
     } // learning

@@ -78,6 +78,18 @@ TEST(conv_lib_test, bad_img_read_path){
 
 }
 
+TEST(conv_lib_test, mmap_load_test){
+    std::string base = CONV_HOME;
+    std::string path = base + "/data/train.csv";
+
+    cv::Mat train_data = simple_conv::learning::learning_private::load_dataset(path);
+
+    ASSERT_EQ(train_data.size[0], 42000);
+    ASSERT_EQ(train_data.size[1], 785);
+
+    free(train_data.data);
+}
+
 
 int main(int argc, char **argv)
 {
