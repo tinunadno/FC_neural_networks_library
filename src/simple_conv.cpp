@@ -217,29 +217,47 @@ namespace simple_conv {
                     one_hot_mtx.at<float>(static_cast<int>(label_idx), i) = 1.f;
                 }
             }
+//
+//            Mat dz2;
+//            add(hidden_layers[3], -one_hot, dz2);
+//            Mat dw2;
+//            gemm(dz2, hidden_layers[1], 1./inputs.cols, cv::Mat(), 0, dw2, GEMM_2_T);
+//            Mat db2;
+//            reduce(dz2, db2, 1, REDUCE_SUM, CV_32F);
+//            db2 /= inputs.cols;
+//            Mat dz1;
+//            gemm(net[2], dz2, 1., cv::Mat(), 0, dz1, GEMM_1_T);
+//            Mat relu_der;
+//            compare(hidden_layers[0], cv::Scalar(0), relu_der, CMP_GT);
+//            relu_der.convertTo(relu_der, CV_32F, 1./255);
+//            multiply(dz1, relu_der, dz1);
+////                dz1 *= relu_der;
+//            Mat dw1;
+//            gemm(dz1, inputs, 1./inputs.cols, cv::Mat(), 0, dw1, GEMM_2_T);
+//            Mat db1;
+//            reduce(dz1, db1, 1, REDUCE_SUM, CV_32F);
+//            db1 /= inputs.cols;
+//            gradient = {dw1, db1, dw2, db2};
+
 
             void backward_propagation(learning_resources& ls){
                 using namespace cv;
-                Mat dz2;
-                add(ls.hidden_layers[3], -ls.one_hot, dz2);
-                Mat dw2;
-                gemm(dz2, ls.hidden_layers[1], 1./ls.train_inputs.cols, cv::Mat(), 0, dw2, GEMM_2_T);
-                Mat db2;
-                reduce(dz2, db2, 1, REDUCE_SUM, CV_32F);
-                db2 /= ls.train_inputs.cols;
-                Mat dz1;
-                gemm(ls.net[2], dz2, 1., cv::Mat(), 0, dz1, GEMM_1_T);
-                Mat relu_der;
-                compare(ls.hidden_layers[0], cv::Scalar(0), relu_der, CMP_GT);
-                relu_der.convertTo(relu_der, CV_32F, 1./255);
-                multiply(dz1, relu_der, dz1);
-//                dz1 *= relu_der;
-                Mat dw1;
-                gemm(dz1, ls.train_inputs, 1./ls.train_inputs.cols, cv::Mat(), 0, dw1, GEMM_2_T);
-                Mat db1;
-                reduce(dz1, db1, 1, REDUCE_SUM, CV_32F);
-                db1 /= ls.train_inputs.cols;
-                ls.gradient = {dw1, db1, dw2, db2};
+
+                int hidden_layers_last = (int)ls.hidden_layers.size() - 1;
+
+                Mat delta;
+                add(ls.hidden_layers[hidden_layers_last], -ls.one_hot, delta);
+                float norm = 1.f/(float)ls.train_inputs.cols;
+
+                for(int i = hidden_layers_last; i > 1; i-=2){
+                    gemm(delta, ls.hidden_layers[i - 2], norm, cv::Mat(), 0, ls.gradient[i - 1], GEMM_2_T);
+                    reduce(delta, ls.gradient[i], 1, REDUCE_SUM, CV_32F);
+                    ls.gradient[i] *= norm;
+                    gemm(ls.gradient[i -1], delta, 1, cv::Mat(), 0, delta, GEMM_1_T);
+                }
+                gemm(delta, ls.train_inputs, norm, cv::Mat(), 0, ls.gradient[0], GEMM_2_T);
+                reduce(delta, ls.gradient[1], 1, REDUCE_SUM, CV_32F);
+                ls.gradient[1] *= norm;
             }
 
             void update_params(learning_resources& ls, float grad_weight){
