@@ -22,8 +22,12 @@ namespace simple_conv {
             int rows, cols;
             int capacity;
 
-            mat(int r, int c) {
-                data = (float *) malloc(r * c * sizeof(float));
+            mat(int r, int c, bool zeros = false) {
+                if(zeros){
+                    data = (float *) calloc(r * c, sizeof(float));
+                }else {
+                    data = (float *) malloc(r * c * sizeof(float));
+                }
                 if (!data) {
                     throw std::runtime_error("Bad alloc!");
                 }
@@ -37,6 +41,12 @@ namespace simple_conv {
                 rows = r;
                 cols = c;
                 this->data = data;
+            }
+
+            mat(const cv::Mat& m){
+                this->data = (float*)m.data;
+                this->rows = m.rows;
+                this->cols = m.cols;
             }
 
             mat() {
@@ -64,37 +74,51 @@ namespace simple_conv {
                 cols = c;
             }
 
+            void fill(float val){
+                for(int i = 0; i < this->cols*this->rows; i++){
+                    *(this->data + i) = val;
+                }
+            }
+
+            int size() const{
+                return rows*cols;
+            }
+
             [[nodiscard]] bool is_valid() const {
                 return rows != 0 && cols != 0 && data != nullptr;
             }
 
-            [[nodiscard]] bool size_eq(mat *m) const {
+            [[nodiscard]] bool size_eq(const mat *m) const {
                 return m != nullptr && m->rows == rows && m->cols == cols && m->data != nullptr;
             }
 
-            [[nodiscard]] bool mul_possible(mat *m2, int tr_flags = GEMM_T_NO) const {
+            [[nodiscard]] bool mul_possible(const mat *m2, int tr_flags = GEMM_T_NO) const {
                 return m2 != nullptr && (tr_flags == 0 && m2->rows == cols || tr_flags & GEMM_T_1 && m2->rows == rows || tr_flags & GEMM_T_2 && m2->cols == cols);
             }
-            [[nodiscard]] bool add_possible(mat *m2, int tr_flags = GEMM_T_NO) const {
+            [[nodiscard]] bool add_possible(const mat *m2, int tr_flags = GEMM_T_NO) const {
                 return m2 != nullptr && (tr_flags == 0 && m2->rows == rows && m2->cols == cols ||
                 tr_flags && m2->rows == cols && m2->cols == rows);
             }
+
+            float get(int row, int col) const{
+                return *(this->data + row * rows + col);
+            }
+
+            void set(int row, int col, float value) const{
+                *(this->data + row * rows + col) = value;
+            }
+
         };
     }
 
-    struct layer{
-        mkl_BLAS_impl::mat w;
-        mkl_BLAS_impl::mat b;
-    };
-
-    typedef std::vector<layer> net;
+    typedef std::vector<mkl_BLAS_impl::mat> net;
 
 //    cv::Mat forward(const cv::Mat &input_layer, const std::vector<cv::Mat> &net);
 
     net generate_empty_net(const std::vector<int> &shapes);
 
     namespace learning {
-        void apply_gradient_descend(std::vector<cv::Mat> &net, const boost::filesystem::path &dataset_path,
+        void apply_gradient_descend(net &net, const boost::filesystem::path &dataset_path,
                                     bool show_progress = false,
                                     float grad_weight = .1f,
                                     int epoch_ = 1,
@@ -105,9 +129,9 @@ namespace simple_conv {
     namespace io {
         cv::Mat read_img_to_input_layer(const boost::filesystem::path &path);
 
-        void save_net(const std::vector<cv::Mat> &net, const boost::filesystem::path &path);
+        void save_net(const net &net, const boost::filesystem::path &path);
 
-        std::vector<cv::Mat> read_net(const boost::filesystem::path &path);
+        net read_net(const boost::filesystem::path &path);
     }
 
 } // simple_conv

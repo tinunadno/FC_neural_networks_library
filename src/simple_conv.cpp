@@ -10,7 +10,7 @@ namespace simple_conv {
     namespace mkl_BLAS_impl{
 //        gemm(delta, ls.hidden_layers[i - 2], norm, cv::Mat(), 0, ls.gradient[i - 1], GEMM_2_T);
 
-        void gemm_y(mat* src1, mat* src2, float alpha, mat* src3, float betta, mat* dest, int transpose_flags = GEMM_T_NO){
+        void gemm_y(const mat* src1, const mat* src2, float alpha, mat* src3, float betta, mat* dest, int transpose_flags = GEMM_T_NO){
             auto t1 = transpose_flags & GEMM_T_1 ? CblasTrans : CblasNoTrans;
             auto t2 = transpose_flags & GEMM_T_2 ? CblasTrans : CblasNoTrans;
 
@@ -70,6 +70,26 @@ namespace simple_conv {
                 }
             }
         }
+
+        void trash_hold(const mat* src, mat* dst){
+            CV_Assert(src->rows == dst->rows && src->cols == dst->cols);
+            for(int i = 0; i < src->rows*src->cols; i++){
+                float val = *(src->data + i);
+                *(dst->data + i) = val > 0.f ? val : 0.f;
+            }
+        }
+
+        void reduce_columns(const mat* src, mat* dst){
+            CV_Assert(src->rows == dst->rows && dst->cols == 1);
+            mat ones(dst->rows, 1);
+            ones.fill(1.f);
+            gemm_y(src, &ones, 1.f, 0, 0, dst);
+        }
+
+        void mul_scalar(mat* m, float s){
+            cblas_sscal(m->rows*m->cols, s, m->data, 1);
+        }
+
     }
 
     namespace sc_private {
@@ -201,7 +221,8 @@ namespace simple_conv {
             cv::Mat bias(fan_out, 1, CV_32F, b.data);
             cv::randu(bias, -.5f, .5f);
 
-            layers.push_back({w, b});
+            layers.push_back(w);
+            layers.push_back(b);
         }
 
         return layers;
@@ -218,9 +239,10 @@ namespace simple_conv {
                 sc_private::profiler profiler_;
             };
 
-            void apply_soft_max(cv::Mat& src, cv::Mat& dst){
-                if (dst.empty()){
-                    dst = cv::Mat(src.size(), src.type());
+            void apply_soft_max(mkl_BLAS_impl::mat& src, mkl_BLAS_impl::mat& dst){
+                using namespace mkl_BLAS_impl;
+                if (!dst.is_valid()){
+                    dst = mat(src.rows, src.cols);
                 }
                 CV_Assert(src.cols == dst.cols);
                 CV_Assert(src.rows == dst.rows);
@@ -229,7 +251,7 @@ namespace simple_conv {
                     float max_val = -std::numeric_limits<float>::max();
 
                     for(int row = 0; row < src.rows; row++){
-                        float val = src.at<float>(row, col);
+                        float val = src.get(row, col);
                         if(val > max_val){
                             max_val = val;
                         }
@@ -237,19 +259,19 @@ namespace simple_conv {
 
                     float exp_sum = 0.f;
                     for(int row = 0; row < src.rows; row++){
-                        float exp_val = sc_private::safe_exp(src.at<float>(row, col) - max_val);
+                        float exp_val = sc_private::safe_exp(src.get(row, col) - max_val);
                         exp_sum += exp_val;
                     }
 
                     if(exp_sum <= 1e-6 || std::isnan(exp_sum)){
                         float uniform = 1.f / static_cast<float>(src.rows);
                         for(int row = 0; row < src.rows; row++){
-                            dst.at<float>(row, col) = uniform * src.at<float>(row, col);
+                            dst.set(row, col, uniform * src.get(row, col));
                         }
                     }else{
                         for(int row = 0; row < src.rows; row++){
-                            float exp_val = sc_private::safe_exp(src.at<float>(row, col) - max_val);
-                            dst.at<float>(row, col) = exp_val / exp_sum;
+                            float exp_val = sc_private::safe_exp(src.get(row, col) - max_val);
+                            dst.set(row, col, exp_val / exp_sum);
                         }
                     }
                 }
@@ -263,19 +285,19 @@ namespace simple_conv {
                 }
             }
 
-            void forward_propagation(const cv::Mat &input_layer, const std::vector<cv::Mat> &net,
-                                     std::vector<cv::Mat> &hidden_layers) {
+            void forward_propagation(const mkl_BLAS_impl::mat &input_layer, const net &net,
+                                     std::vector<mkl_BLAS_impl::mat> &hidden_layers) {
                 using namespace cv;
-                gemm(net[0], input_layer, 1, cv::Mat(), 0, hidden_layers[0]);
-                broadcast_column_addition(hidden_layers[0], net[1]);
-                threshold(hidden_layers[0], hidden_layers[1], 0.0, 0.0, THRESH_TOZERO);
+                mkl_BLAS_impl::gemm_y(&net[0], &input_layer, 1, 0, 0, &hidden_layers[0]);
+                mkl_BLAS_impl::broadcast_column_vector(&hidden_layers[0], &net[1]);
+                mkl_BLAS_impl::trash_hold(&hidden_layers[0], &hidden_layers[1]);
                 for(int i = 2; i < net.size(); i+=2){
-                    gemm(net[i], hidden_layers[i - 1], 1, cv::Mat(), 0, hidden_layers[i]);
-                    broadcast_column_addition(hidden_layers[i], net[i + 1]);
+                    mkl_BLAS_impl::gemm_y(&net[i], &hidden_layers[i - 1], 1, 0, 0, &hidden_layers[i]);
+                    mkl_BLAS_impl::broadcast_column_vector(&hidden_layers[i], &net[i + 1]);
                     if(i + 2 >= net.size()){
                         learning_private::apply_soft_max(hidden_layers[i], hidden_layers[i + 1]);
                     }else {
-                        threshold(hidden_layers[i], hidden_layers[i + 1], 0.0, 0.0, THRESH_TOZERO);
+                        mkl_BLAS_impl::trash_hold(&hidden_layers[i], &hidden_layers[i + 1]);
                     }
                 }
 
@@ -286,34 +308,35 @@ namespace simple_conv {
                 forward_propagation(ls.train_inputs, ls.net, ls.hidden_layers);
             }
 
-            void one_hot(const cv::Mat& labels, cv::Mat& one_hot_mtx, int classes_count){
-                one_hot_mtx = cv::Mat::zeros(classes_count, labels.cols, CV_32F);
+            void one_hot(const mkl_BLAS_impl::mat& labels, mkl_BLAS_impl::mat& one_hot_mtx, int classes_count){
+                one_hot_mtx = mkl_BLAS_impl::mat(classes_count, labels.cols, true);
                 for(int i = 0; i < labels.cols; i++){
-                    float label_idx = labels.at<float>(0, i);
-                    one_hot_mtx.at<float>(static_cast<int>(label_idx), i) = 1.f;
+                    float label_idx = *(labels.data + i);
+                    one_hot_mtx.set(static_cast<int>(label_idx), i, 1.f);
                 }
             }
 
             void backward_propagation(learning_resources& ls){
-                using namespace cv;
+                using namespace mkl_BLAS_impl;
+
 
                 int hidden_layers_last = (int)ls.hidden_layers.size() - 1;
                 ls.profiler_.start_measure("    delta0");
-                Mat delta;
-                add(ls.hidden_layers[hidden_layers_last], -ls.one_hot, delta);
+                mat delta;
+                add(&ls.hidden_layers[hidden_layers_last], &ls.one_hot, -1.f, &delta);
                 ls.profiler_.stop_measure("    delta0");
                 float norm = 1.f/(float)ls.train_inputs.cols;
 
                 for(int i = hidden_layers_last; i > 1; i-=2){
                     ls.profiler_.start_measure("    dWn");
-                    gemm(delta, ls.hidden_layers[i - 2], norm, cv::Mat(), 0, ls.gradient[i - 1], GEMM_2_T);
+                    gemm_y(&delta, &ls.hidden_layers[i - 2], norm, 0, 0, &ls.gradient[i - 1], GEMM_T_2);
                     ls.profiler_.stop_measure("    dWn");
                     ls.profiler_.start_measure("    dbn");
-                    reduce(delta, ls.gradient[i], 1, REDUCE_SUM, CV_32F);
-                    ls.gradient[i] *= norm;
+                    reduce_columns(&delta, &ls.gradient[i]);
+                    mul_scalar(&ls.gradient[i], norm);
                     ls.profiler_.stop_measure("    dbn");
                     ls.profiler_.start_measure("    delta_n");
-                    gemm(ls.net[i -1], delta, 1, cv::Mat(), 0, delta, GEMM_1_T);
+                    gemm_y(&ls.net[i -1], &delta, 1.f, 0, 0, &delta, GEMM_T_1);
                     ls.profiler_.stop_measure("    delta_n");
                 }
                 ls.profiler_.start_measure("    dw0");
@@ -324,43 +347,44 @@ namespace simple_conv {
 //                gemm(delta, ls.train_inputs, norm, cv::Mat(), 0, ls.gradient[0], GEMM_2_T);
                 ls.profiler_.stop_measure("    dw0");
                 ls.profiler_.start_measure("    db0");
-                reduce(delta, ls.gradient[1], 1, REDUCE_SUM, CV_32F);
-                ls.gradient[1] *= norm;
+                reduce_columns(&delta, &ls.gradient[1]);
+                mul_scalar(&ls.gradient[1], norm);
                 ls.profiler_.stop_measure("    db0");
             }
 
             void update_params(learning_resources& ls, float grad_weight){
+                using namespace mkl_BLAS_impl;
                 for(int i = 0; i < (int)ls.net.size(); i++){
-                    ls.net[i] -= grad_weight * ls.gradient[i];
+                    add(&ls.net[i], &ls.gradient[i], -grad_weight, &ls.net[i]);
                 }
             }
 
-            void get_predictions(const cv::Mat& last_layer, cv::Mat& predictions){
-                predictions = cv::Mat(1, last_layer.cols, CV_32F);
+            void get_predictions(const mkl_BLAS_impl::mat& last_layer, mkl_BLAS_impl::mat& predictions){
+                predictions = mkl_BLAS_impl::mat(1, last_layer.cols);
                 for(int i = 0; i < last_layer.cols; i++){
-                    float max_val = last_layer.at<float>(0, i);
+                    float max_val = last_layer.get(0, i);
                     int best_idx = 0;
                     for(int j = 0; j < last_layer.rows; j++){
-                        float val = last_layer.at<float>(j, i);
+                        float val = last_layer.get(j, i);
                         if(val > max_val){
                             max_val = val;
                             best_idx = j;
                         }
                     }
-                    predictions.at<float>(0, i) = (float)best_idx;
+                    predictions.set(0, i, (float)best_idx);
                 }
             }
 
-            float get_accuracy(const cv::Mat& labels, const cv::Mat& predictions){
+            float get_accuracy(const mkl_BLAS_impl::mat& labels, const mkl_BLAS_impl::mat& predictions){
                 int matches = 0;
                 for(int i = 0; i < labels.cols; i++){
-                    matches += abs(labels.at<float>(0, i) - predictions.at<float>(0, i)) < 1e-6;
+                    matches += abs(labels.get(0, i) - predictions.get(0, i)) < 1e-6;
                 }
                 return (float)matches / (float)labels.cols * 100;
             }
 
             //!!! YOU MUST MANUALLY FREE DATASET DATA
-            cv::Mat load_dataset(const boost::filesystem::path &filename, char delimiter = ',', bool has_header = true) {
+            mkl_BLAS_impl::mat load_dataset(const boost::filesystem::path &filename, char delimiter = ',', bool has_header = true) {
 
                 if(!exists(filename)){
                     std::cerr << "Dataset path doesn't exists!" << std::endl;
@@ -439,42 +463,44 @@ namespace simple_conv {
 
                 cv::transpose(mat_, mat_);
 
-                return mat_;
+                return mkl_BLAS_impl::mat(mat_.rows, mat_.cols, (float*)mat_.data);
             }
-            learning_resources initialize_resources(std::vector<cv::Mat>& net, const boost::filesystem::path& dataset_path, int dev_size){
+            learning_resources initialize_resources(net& net_, const boost::filesystem::path& dataset_path, int dev_size){
                 using namespace mkl_BLAS_impl;
                 using namespace std;
                 using namespace cv;
-                Mat data = learning_private::load_dataset(dataset_path);
+                mat data = learning_private::load_dataset(dataset_path);
 
-                Mat dev_set = data(cv::Range::all(), cv::Range(0, dev_size));
-                Mat train_set = data(cv::Range::all(), cv::Range(dev_size, data.cols));
+                Mat data_wrapper(data.rows, data.cols, CV_32F, data.data);
+
+                Mat dev_set = data_wrapper(cv::Range::all(), cv::Range(0, dev_size));
+                Mat train_set = data_wrapper(cv::Range::all(), cv::Range(dev_size, data_wrapper.cols));
 
                 Mat dev_labels = dev_set.row(0);
-                Mat dev_inputs = dev_set.rowRange(1, data.rows) / 255.f;
+                Mat dev_inputs = dev_set.rowRange(1, data_wrapper.rows) / 255.f;
 
                 Mat train_labels = train_set.row(0);
-                Mat train_inputs = train_set.rowRange(1, data.rows) / 255.f;
+                Mat train_inputs = train_set.rowRange(1, data_wrapper.rows) / 255.f;
 
-                Mat one_hot;
-                learning_private::one_hot(train_labels, one_hot, (net[net.size() - 1]).rows);
+                mat one_hot;
+                learning_private::one_hot(train_labels, one_hot, (net_[net_.size() - 1]).rows);
 
-                vector<mat> hidden_layers(net.size());
-                vector<mat> dev_hidden_layers(net.size());
-                vector<mat> gradient(net.size());
-                for(int i = 0; i < net.size() - 1; i+=2){
-                    hidden_layers[i] = mat(net[i+1].rows, train_inputs.cols);
-                    hidden_layers[i + 1] = mat(net[i+1].rows, train_inputs.cols);
-                    dev_hidden_layers[i] = mat(net[i+1].rows, dev_inputs.cols);
-                    dev_hidden_layers[i + 1] = mat(net[i+1].rows, dev_inputs.cols);
-                    gradient[i] = mat(net[i].rows, net[i].cols);
-                    gradient[i + 1] = mat(net[i + 1].rows, net[i + 1].cols);
+                vector<mat> hidden_layers(net_.size());
+                vector<mat> dev_hidden_layers(net_.size());
+                net gradient(net_.size());
+                for(int i = 0; i < net_.size(); i+=2){
+                    hidden_layers[i] = mat(net_[i + 1].rows, train_inputs.cols);
+                    hidden_layers[i + 1] = mat(net_[i + 1].rows, train_inputs.cols);
+                    dev_hidden_layers[i] = mat(net_[i + 1].rows, dev_inputs.cols);
+                    dev_hidden_layers[i + 1] = mat(net_[i + 1].rows, dev_inputs.cols);
+                    gradient[i] = mat(net_[i].rows, net_[i].cols);
+                    gradient[i + 1] = mat(net_[i + 1].rows, net_[i + 1].cols);
                 }
 
-                return {net, dev_labels, dev_inputs, train_labels, train_inputs, one_hot, hidden_layers, dev_hidden_layers, gradient, sc_private::profiler()};
+                return {net_, dev_labels, dev_inputs, train_labels, train_inputs, one_hot, hidden_layers, dev_hidden_layers, gradient, sc_private::profiler()};
             }
 
-            void show_accuracy_sample(const learning_resources& ls, int sample_size){
+            void show_accuracy_sample(const learning_resources& ls, int sample_size){ // TODO fix it
                 using namespace cv;
 
                 cv::Mat sample = ls.dev_inputs.colRange(cv::Range(0, sample_size));
@@ -497,7 +523,7 @@ namespace simple_conv {
 
         } // learning_private
 
-        void apply_gradient_descend(std::vector<cv::Mat> &net, const boost::filesystem::path &dataset_path,
+        void apply_gradient_descend(net &net, const boost::filesystem::path &dataset_path,
                                     bool show_progress, float grad_weight, int epoch_, int dev_size, int sample_size) {
             using namespace std;
             using namespace cv;
@@ -514,7 +540,7 @@ namespace simple_conv {
                 learning_private::update_params(ls, grad_weight);
                 if(i % 10 == 0 && show_progress){
                     learning_private::forward_propagation(ls.dev_inputs, net, ls.dev_hidden_layers);
-                    cv::Mat predictions;
+                    mkl_BLAS_impl::mat predictions;
                     learning_private::get_predictions(ls.dev_hidden_layers[ls.dev_hidden_layers.size() - 1], predictions);
                     float accuracy = learning_private::get_accuracy(ls.dev_labels, predictions);
                     cout << "EPOCH: " << i << endl;
@@ -546,7 +572,7 @@ namespace simple_conv {
             return img;
         }
 
-        void save_net(const std::vector<cv::Mat> &net, const boost::filesystem::path &path) {
+        void save_net(const net &net, const boost::filesystem::path &path) {
             using namespace std;
             using namespace cv;
 
@@ -554,7 +580,7 @@ namespace simple_conv {
             size_t total_size = sizeof(int) + layer_count * 2 * sizeof(int);
             vector<Size> sizes(layer_count);
             for (int i = 0; i < layer_count; i++) {
-                sizes[i] = net[i].size();
+                sizes[i] = Size(net[i].rows, net[i].cols);
                 total_size += sizeof(float) * sizes[i].width * sizes[i].height;
             }
 
@@ -591,7 +617,7 @@ namespace simple_conv {
             free(data);
         }
 
-        std::vector<cv::Mat> read_net(const boost::filesystem::path &path) {
+        net read_net(const boost::filesystem::path &path) {
             using namespace std;
             using namespace cv;
 
@@ -610,7 +636,7 @@ namespace simple_conv {
             in.read(reinterpret_cast<char *>(&layer_count), sizeof(int));
 
             vector<Size> sizes(layer_count);
-            vector<Mat> layers(layer_count);
+            net layers(layer_count);
 
             int w, h;
             for (int i = 0; i < layer_count; i++) {
@@ -619,8 +645,8 @@ namespace simple_conv {
                 sizes[i] = Size(w, h);
             }
             for (int i = 0; i < layer_count; i++) {
-                layers[i] = Mat(sizes[i], CV_32F);
-                in.read(reinterpret_cast<char *>(layers[i].data), (long) (sizeof(float) * (long) layers[i].total()));
+                layers[i] = mkl_BLAS_impl::mat(sizes[i].width, sizes[i].height);
+                in.read(reinterpret_cast<char *>(layers[i].data), (long) (sizeof(float) * (long) layers[i].size()));
             }
 
             in.close();
