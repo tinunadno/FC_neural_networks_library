@@ -6,18 +6,25 @@ set(CMAKE_CXX_STANDARD 20)
 set(opencv_path "/home/perminov/clion/opencv/lib/cmake/opencv4")
 find_package(OpenCV 4.9.0 EXACT REQUIRED PATHS ${opencv_path} NO_DEFAULT_PATH)
 find_package(Boost COMPONENTS filesystem system)
+set(MKL_DIR "/home/perminov/intel/oneapi/mkl/latest/")
+find_package(MKL REQUIRED)
+set(MKL_INCLUDE_DIRS "/home/perminov/intel/oneapi/mkl/latest/include/")
 
 message("-- Boost filesystem ${Boost_FILESYSTEM_LIBRARY}")
 message("-- Boost system ${Boost_SYSTEM_LIBRARY}")
 message("-- Boost includes ${Boost_INCLUDE_DIRS}")
+message("-- MKL includes ${MKL_INCLUDE_DIRS}")
+message("-- MKL root ${MKL_ROOT}")
 
 
 add_library(conv_lib SHARED
         src/simple_conv.cpp
         src/simple_conv.h)
 
+
 target_include_directories(conv_lib PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${MKL_INCLUDE_DIRS}
 )
 
 target_link_libraries(
@@ -26,4 +33,7 @@ target_link_libraries(
         ${Boost_FILESYSTEM_LIBRARY}
         ${Boost_SYSTEM_LIBRARY}
         ${OpenCV_LIBS}
+        ${MKL_ROOT}/lib/libmkl_intel_lp64.so
+        ${MKL_ROOT}/lib/libmkl_sequential.so
+        ${MKL_ROOT}/lib/libmkl_core.so
 )
