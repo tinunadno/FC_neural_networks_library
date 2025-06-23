@@ -21,6 +21,7 @@ namespace simple_conv {
             float *data;
             int rows, cols;
             int capacity;
+            bool free_me = true;
 
             mat(int r, int c, bool zeros = false) {
                 if(zeros){
@@ -40,13 +41,19 @@ namespace simple_conv {
                 capacity = r * c;
                 rows = r;
                 cols = c;
+                free_me = false;
                 this->data = data;
             }
 
             mat(const cv::Mat& m){
-                this->data = (float*)m.data;
                 this->rows = m.rows;
                 this->cols = m.cols;
+                this->capacity = m.rows * m.cols;
+                this->data = (float*)malloc(this->capacity * sizeof(float));
+                if (!data) {
+                    throw std::runtime_error("Bad alloc!");
+                }
+                memcpy((char*)this->data, m.data, capacity * sizeof(float));
             }
 
             mat() {
@@ -54,10 +61,30 @@ namespace simple_conv {
                 rows = 0.;
                 cols = 0.;
                 capacity = 0;
+                free_me = false;
             }
 
-            ~mat() {
+//            ~mat() {
+//                if(free_me)
+//                    free(data);
+//            }
+//
+            void manual_free(){
                 free(data);
+            }
+
+            mat& operator=(mat m){
+                swap(*this, m);
+                return *this;
+            }
+
+            friend void swap(mat& a, mat& b) noexcept{
+                using std::swap;
+                swap(a.rows, b.rows);
+                swap(a.cols, b.cols);
+                swap(a.capacity, b.capacity);
+                swap(a.data, b.data);
+                swap(a.free_me, b.free_me);
             }
 
             void reshape(int r, int c, bool force_realloc = false) {
@@ -101,11 +128,11 @@ namespace simple_conv {
             }
 
             float get(int row, int col) const{
-                return *(this->data + row * rows + col);
+                return *(this->data + row * cols + col);
             }
 
             void set(int row, int col, float value) const{
-                *(this->data + row * rows + col) = value;
+                *(this->data + row * cols + col) = value;
             }
 
         };
@@ -113,7 +140,7 @@ namespace simple_conv {
 
     typedef std::vector<mkl_BLAS_impl::mat> net;
 
-//    cv::Mat forward(const cv::Mat &input_layer, const std::vector<cv::Mat> &net);
+//    cv::Mat forward(const cv::Mat &input_layer, const std::vector<cv::Mat> &net_);
 
     net generate_empty_net(const std::vector<int> &shapes);
 
@@ -121,7 +148,7 @@ namespace simple_conv {
         void apply_gradient_descend(net &net, const boost::filesystem::path &dataset_path,
                                     bool show_progress = false,
                                     float grad_weight = .1f,
-                                    int epoch_ = 1,
+                                    int epoch_ = 500,
                                     int dev_size = 1000,
                                     int sample_size = -1);
     }
