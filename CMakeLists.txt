@@ -19,7 +19,14 @@ message("-- MKL root ${MKL_ROOT}")
 
 add_library(conv_lib SHARED
         src/simple_conv.cpp
-        src/simple_conv.h)
+        src/simple_conv.h
+        src/blas_impl.cpp
+        src/blas_impl.h
+        src/io.cpp
+        src/learning.cpp
+        src/private.cpp
+        src/sc_private.h
+)
 
 
 target_include_directories(conv_lib PUBLIC
