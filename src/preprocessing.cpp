@@ -73,6 +73,9 @@ namespace simple_conv::preprocessing{
             roi.height = std::min(img.size().height - roi.y, roi.height);
         }
 
+        if(roi.width == 0 || roi.height == 0){
+            throw std::exception();
+        }
         img = img(roi);
 
         img.convertTo(img, CV_32F, 1.0 / 255.0);

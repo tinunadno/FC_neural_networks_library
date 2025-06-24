@@ -20,8 +20,11 @@ std::vector<float> forward(const QPixmap& pixmap, simple_conv::net& net_) {
         image = image.convertToFormat(QImage::Format_RGB888);
 
     cv::Mat cv_img(image.height(), image.width(), CV_8UC3, const_cast<uchar*>(image.bits()), image.bytesPerLine());
-
-    simple_conv::preprocessing::crop_image(cv_img, true);
+    try {
+        simple_conv::preprocessing::crop_image(cv_img, true);
+    }catch (const std::exception& e){
+        return {};
+    }
 
     cv_img = cv_img.reshape(1, (int) cv_img.total());
 

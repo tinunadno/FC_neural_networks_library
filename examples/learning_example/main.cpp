@@ -6,14 +6,14 @@
 
 int main(){
     std::string base_path = CONV_HOME;
-    std::string dataset_path = base_path + "data/train.csv";
+    std::string dataset_path = base_path + "data/processed_train.csv";
 //    std::string processed_dataset_path = base_path + "data/processed_train.csv";
 //
 //    simple_conv::preprocessing::preprocess_dataset(dataset_path, processed_dataset_path);
 
     std::string write_back_path = base_path + "data/net_.conv";
 
-    auto net = simple_conv::generate_empty_net({28 * 28, 128, 16, 10});
+    auto net = simple_conv::generate_empty_net({28 * 28, 16, 16, 10});
 
 
 
