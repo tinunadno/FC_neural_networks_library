@@ -18,7 +18,7 @@ namespace simple_conv {
     namespace learning {
         void apply_gradient_descend(net &net, const boost::filesystem::path &dataset_path,
                                     bool show_progress = false,
-                                    float grad_weight = .5f,
+                                    float grad_weight = .1f,
                                     int epoch_ = 500,
                                     int dev_size = 1000,
                                     int sample_size = 4,

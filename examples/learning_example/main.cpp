@@ -13,10 +13,12 @@ int main(){
 
     std::string write_back_path = base_path + "data/net_.conv";
 
-    auto net = simple_conv::generate_empty_net({28 * 28, 16, 16, 10});
+    auto net = simple_conv::generate_empty_net({28 * 28, 64, 32, 10});
 
 
 
     simple_conv::learning::apply_gradient_descend(net, dataset_path, true);
     simple_conv::io::save_net(net, write_back_path);
+
+    return 0;
 }

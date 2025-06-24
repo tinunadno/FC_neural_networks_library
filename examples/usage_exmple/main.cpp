@@ -28,4 +28,6 @@ int main() {
     for (int i = 0; i < (int) output_layer_1.size(); i++) {
         std::cout << output_layer_1.get(0, i) << std::endl;
     }
+
+    return 0;
 }

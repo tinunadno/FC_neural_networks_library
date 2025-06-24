@@ -176,7 +176,7 @@ namespace simple_conv::mkl_BLAS_impl {
     void gemm_y(const mat *src1, const mat *src2, float alpha, mat *src3, float betta, mat *dest,
                 int transpose_flags = GEMM_T_NO);
 
-    void add(mat *src1, mat *src2, float alpha, mat *dest);
+    void add(const mat *src1, const mat *src2, float alpha, mat *dest);
 
     void add_no_copy(const mat *src1, mat *src2, float alpha);
 

@@ -13,7 +13,7 @@ namespace simple_conv::learning {
             sc_private::profiler profiler_;
         };
 
-        void apply_relu_der(mkl_BLAS_impl::mat &dz, mkl_BLAS_impl::mat &z){
+        void apply_relu_der(mkl_BLAS_impl::mat &dz, const mkl_BLAS_impl::mat &z){
             CV_Assert(dz.cols == z.cols);
             CV_Assert(dz.rows == z.rows);
             int total = dz.rows * dz.cols;
@@ -62,27 +62,37 @@ namespace simple_conv::learning {
             }
         }
 
-        void backward_propagation(perc_learning_resources &ls) {
+        void backward_propagation(const std::vector<mkl_BLAS_impl::mat>& hidden_layers,
+                                  const mkl_BLAS_impl::mat& one_hot,
+                                  const mkl_BLAS_impl::mat& train_inputs,
+                                  net& gradient,
+                                  const net& net_,
+                                  mkl_BLAS_impl::mat& delta) { //! Ps left delta as an argument for outer access
             using namespace mkl_BLAS_impl;
 
-            int hidden_layers_last = (int) ls.hidden_layers.size() - 1;
-            mat delta;
-            add(&ls.hidden_layers[hidden_layers_last], &ls.one_hot, -1.f, &delta);
+            int hidden_layers_last = (int) hidden_layers.size() - 1;
+            add(&hidden_layers[hidden_layers_last], &one_hot, -1.f, &delta);
             cv::Mat asd(delta.rows, delta.cols, CV_32F, delta.data);
-            float norm = 1.f / (float) ls.train_inputs.cols;
+            float norm = 1.f / (float) train_inputs.cols;
             for (int i = hidden_layers_last; i > 1; i -= 2) {
-                gemm_y(&delta, &ls.hidden_layers[i - 2], norm, 0, 0, &ls.gradient[i - 1], GEMM_T_2);
-                reduce_columns(&delta, &ls.gradient[i]);
-                mul_scalar(&ls.gradient[i], norm);
+                gemm_y(&delta, &hidden_layers[i - 2], norm, 0, 0, &gradient[i - 1], GEMM_T_2);
+                reduce_columns(&delta, &gradient[i]);
+                mul_scalar(&gradient[i], norm);
                 mat nu_delta;
-                gemm_y(&ls.net_[i - 1], &delta, 1.f, 0, 0, &nu_delta, GEMM_T_1);
+                gemm_y(&net_[i - 1], &delta, 1.f, 0, 0, &nu_delta, GEMM_T_1);
                 delta = nu_delta;
-                apply_relu_der(delta, ls.hidden_layers[i - 3]);
+                apply_relu_der(delta, hidden_layers[i - 3]);
             }
-            mkl_BLAS_impl::gemm_y(&delta, &ls.train_inputs, norm, 0, 0,
-                                  &ls.gradient[0], mkl_BLAS_impl::transpose_flags::GEMM_T_2);
-            reduce_columns(&delta, &ls.gradient[1]);
-            mul_scalar(&ls.gradient[1], norm);
+            mkl_BLAS_impl::gemm_y(&delta, &train_inputs, norm, 0, 0,
+                                  &gradient[0], mkl_BLAS_impl::transpose_flags::GEMM_T_2);
+            reduce_columns(&delta, &gradient[1]);
+            mul_scalar(&gradient[1], norm);
+        }
+
+        void backward_propagation(perc_learning_resources &ls) {
+            using namespace mkl_BLAS_impl;
+            mat delta;
+            backward_propagation(ls.hidden_layers, ls.one_hot, ls.train_inputs, ls.gradient, ls.net_, delta);
         }
 
         void update_params(perc_learning_resources &ls, float grad_weight) {

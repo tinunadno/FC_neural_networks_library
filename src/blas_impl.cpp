@@ -44,7 +44,7 @@ namespace simple_conv::mkl_BLAS_impl {
                     src3 == nullptr ? 1.f : betta, dest->data, dest->cols);
     }
 
-    void add(mat *src1, mat *src2, float alpha, mat *dest) {
+    void add(const mat *src1, const mat *src2, float alpha, mat *dest) {
         CV_Assert(src1->cols == src2->cols && src1->rows == src2->rows);
         if (dest->is_valid()) {
             CV_Assert(src1->cols == dest->cols && src1->rows == dest->rows);

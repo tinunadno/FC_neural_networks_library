@@ -2,3 +2,5 @@ cmake-build-debug
 */cmake-build-debug
 */*/cmake-build-debug
 .idea
+examples/data/weights_as_images/*.png
+examples/data/*.png
