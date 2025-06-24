@@ -56,7 +56,7 @@ namespace simple_conv::mkl_BLAS_impl {
         cblas_saxpy(total, alpha, src2->data, 1, dest->data, 1);
     }
 
-    void add_no_copy(const mat *src1, mat *src2, float alpha){
+    void add_no_copy(mat *src1, const mat *src2, float alpha){
         CV_Assert(src1->cols == src2->cols && src1->rows == src2->rows);
         int total = src1->rows * src1->cols;
         cblas_saxpy(total, alpha, src2->data, 1, src1->data, 1);

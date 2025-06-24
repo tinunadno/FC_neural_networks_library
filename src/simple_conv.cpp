@@ -11,7 +11,7 @@ namespace simple_conv {
         for(int i = 0; i < net_.size(); i+=2){
             mat tmp;
             gemm_y(&net_[i], &processing_layer, 1.f, 0, 0, &tmp);
-            add_no_copy(&net_[i + 1], &tmp, 1.f);
+            add_no_copy(&tmp, &net_[i + 1], 1.f);
             processing_layer = tmp;
             if (i + 2 >= net_.size()) {
                 sc_private::apply_soft_max(processing_layer, processing_layer);

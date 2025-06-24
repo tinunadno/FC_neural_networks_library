@@ -178,7 +178,7 @@ namespace simple_conv::mkl_BLAS_impl {
 
     void add(const mat *src1, const mat *src2, float alpha, mat *dest);
 
-    void add_no_copy(const mat *src1, mat *src2, float alpha);
+    void add_no_copy(mat *src1, const mat *src2, float alpha);
 
     void broadcast_column_vector(mat *src1, const mat *addition);
 

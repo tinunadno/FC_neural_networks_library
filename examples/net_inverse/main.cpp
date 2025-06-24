@@ -13,6 +13,8 @@ int main(){
     int last_layer_size = (*(net_.end() - 1)).size();
 
     mat input(net_[0].cols, last_layer_size);
+    cv::Mat temp_rnd(input.rows, input.cols, CV_32F, input.data);
+    cv::randu(temp_rnd, -.5f, .5f);
     mat one_hot(last_layer_size, last_layer_size);
     mat labels(last_layer_size, 1);
     for(int i = 0; i < last_layer_size; i++){
