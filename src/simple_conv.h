@@ -19,7 +19,7 @@ namespace simple_conv {
         void apply_gradient_descend(net &net, const boost::filesystem::path &dataset_path,
                                     bool show_progress = false,
                                     float grad_weight = .5f,
-                                    int epoch_ = 1000,
+                                    int epoch_ = 500,
                                     int dev_size = 1000,
                                     int sample_size = 4,
                                     int check_period = 10,
@@ -28,10 +28,20 @@ namespace simple_conv {
                                     float decay_factor = .7f);
     }
 
+    namespace preprocessing{
+        void preprocess_dataset(const boost::filesystem::path& in, const boost::filesystem::path& out);
+
+        void crop_image(mkl_BLAS_impl::mat& img);
+
+        void crop_image(cv::Mat& img, bool blur_me = false, int blur_size = 5);
+    }
+
     namespace io {
         mkl_BLAS_impl::mat
         load_dataset(const boost::filesystem::path &filename, bool transposed = false,
                      char delimiter = ',', bool has_header = true);
+
+        void save_dataset(const boost::filesystem::path &filename, mkl_BLAS_impl::mat& data, char delimiter = ',');
 
         cv::Mat read_img_to_input_layer(const boost::filesystem::path &path, bool invert = false, bool normalize = false);
 

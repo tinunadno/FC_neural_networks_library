@@ -220,36 +220,39 @@ namespace simple_conv::learning {
 
         float best_error = numeric_limits<float>::max();
         int stagnation_count = 0;
+        std::chrono::time_point<std::chrono::system_clock> start = std::chrono::system_clock::now();
 
         for (int i = 0; i < epoch_; i++) {
             learning_private::forward_propagation(ls);
             learning_private::backward_propagation(ls);
             learning_private::update_params(ls, grad_weight);
-            if (i % check_period == 0 && dev_size > 0) {
+            if (i % check_period == 0 && dev_size > 0 && i > 0) {
                 learning_private::forward_propagation(ls.dev_inputs, net, ls.dev_hidden_layers);
                 mkl_BLAS_impl::mat predictions;
                 learning_private::get_predictions(ls.dev_hidden_layers[ls.dev_hidden_layers.size() - 1],
                                                   predictions);
-                float accuracy = learning_private::get_accuracy(ls.dev_labels, predictions);
-                float error = learning_private::get_cross_entropy(ls.dev_labels, predictions);
-                if(error < best_error){
-                    stagnation_count = 0;
-                    best_error = error;
-                }else{
-                    stagnation_count++;
-                    if(stagnation_count > patience){
-                        grad_weight *= decay_factor;
-                        stagnation_count = 0;
-                        cout << "decaying learning rate" << endl;
-                    }
-                }
+//                if(error < best_error){
+//                    stagnation_count = 0;
+//                    best_error = error;
+//                }else{
+//                    stagnation_count++;
+//                    if(stagnation_count > patience){
+//                        grad_weight *= decay_factor;
+//                        stagnation_count = 0;
+//                        cout << "decaying learning rate" << endl;
+//                    }
+//                }
                 if(show_progress) {
+                    float accuracy = learning_private::get_accuracy(ls.dev_labels, predictions);
+                    auto end = std::chrono::system_clock::now();
+                    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
                     cout << "-----------------------" << endl;
                     cout << "EPOCH: " << i << endl;
                     cout << "ACCURACY: " << accuracy << "%" << endl;
-                    cout << "ERROR(CE): " << error << endl;
                     cout << "LEARNING RATE: " << grad_weight << endl;
-                    cout << "BEST ERROR: " << best_error << endl;
+                    cout << "EPOCH ELAPSED TIME: " << duration << " microseconds" << endl;
+                    cout << "APPROXIMATE TIME LEFT: " << (float)((epoch_ - i) * duration) / 1000000.f << " seconds" << endl;
+                    start = std::chrono::system_clock::now();
                 }
             }
         }

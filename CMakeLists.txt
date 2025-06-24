@@ -26,6 +26,7 @@ add_library(conv_lib SHARED
         src/learning.cpp
         src/private.cpp
         src/sc_private.h
+        src/preprocessing.cpp
 )
 
 

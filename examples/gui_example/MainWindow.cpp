@@ -21,14 +21,8 @@ std::vector<float> forward(const QPixmap& pixmap, simple_conv::net& net_) {
 
     cv::Mat cv_img(image.height(), image.width(), CV_8UC3, const_cast<uchar*>(image.bits()), image.bytesPerLine());
 
+    simple_conv::preprocessing::crop_image(cv_img, true);
 
-    cv::resize(cv_img, cv_img,cv::Size(28, 28), cv::INTER_LINEAR);
-
-    cv::blur(cv_img, cv_img, cv::Size(1, 1));
-
-
-    cv::cvtColor(cv_img, cv_img, cv::COLOR_BGR2GRAY);
-    cv_img.convertTo(cv_img, CV_32F, 1.0 / 255.0);
     cv_img = cv_img.reshape(1, (int) cv_img.total());
 
     auto result = simple_conv::forward(cv_img, net_);

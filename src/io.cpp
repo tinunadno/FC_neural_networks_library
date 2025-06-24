@@ -2,6 +2,8 @@
 #include <fstream>
 #include <sys/mman.h>
 #include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 namespace simple_conv::io {
 
@@ -99,6 +101,40 @@ namespace simple_conv::io {
         }else{
             return mkl_BLAS_impl::mat((int) num_rows, (int) num_cols, (float *) mat_data);
         }
+    }
+
+    void save_dataset(const boost::filesystem::path &filename, mkl_BLAS_impl::mat& data, char delimiter){
+        size_t str_size = (data.cols + data.cols * 3) * data.rows + data.rows;
+        //                 delimiters  values (0-255)   for each row   \n's
+        char* out_file = (char*)malloc(str_size + 1);
+        if(!out_file){
+            throw std::bad_alloc();
+        }
+        char* out_file_ptr = out_file;
+        float* data_ptr = data.data;
+        for(int i = 0; i < data.rows; i ++){
+            for(int j = 0; j < data.cols; j++){
+                float f_val = *(data_ptr++);
+                if(j != 0){
+                    f_val *= 255.f;
+                }
+                auto curr_val = (unsigned char)(f_val);
+                sprintf(out_file_ptr, "%03d", curr_val);
+                out_file_ptr+=3;
+                if(j + 1 < data.cols) {
+                    *out_file_ptr++ = delimiter;
+                }
+            }
+            *out_file_ptr++ = '\n';
+        }
+        *out_file_ptr = '\0';
+        FILE* file = fopen(filename.c_str(), "w");
+        if(!file){
+            throw std::runtime_error("failed to create a file");
+        }
+        fprintf(file, "%s", out_file);
+        fclose(file);
+        free(out_file);
     }
 
     cv::Mat read_img_to_input_layer(const boost::filesystem::path &path, bool invert, bool normalize) {
