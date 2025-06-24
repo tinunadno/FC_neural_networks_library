@@ -21,7 +21,7 @@ namespace simple_conv {
                                     float grad_weight = .1f,
                                     int epoch_ = 500,
                                     int dev_size = 1000,
-                                    int sample_size = 4,
+                                    int sample_size = -1,
                                     int check_period = 10,
                                     int batch_size = 0,
                                     int patience = 15,

@@ -18,6 +18,10 @@ Q_OBJECT
 public:
     explicit MainWindow(QWidget *parent = nullptr);
 
+    void set_net_(const std::string& net_path){
+        net_ = simple_conv::io::read_net(net_path);
+    }
+
 private slots:
     void onImageChanged();
     void updateUI(const std::vector<float>& results);

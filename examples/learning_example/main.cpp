@@ -11,7 +11,7 @@ int main(){
 //
 //    simple_conv::preprocessing::preprocess_dataset(dataset_path, processed_dataset_path);
 
-    std::string write_back_path = base_path + "data/net_.conv";
+    std::string write_back_path = base_path + "data/net.conv";
 
     auto net = simple_conv::generate_empty_net({28 * 28, 64, 32, 10});
 

@@ -98,12 +98,6 @@ private:
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
-
-    std::string base_path = CONV_HOME;
-    std::string net_path = base_path + "data/net_.conv";
-
-    net_ = simple_conv::io::read_net(net_path);
-
     QPixmap pixmap(400, 400);
     pixmap.fill(Qt::black);
 
