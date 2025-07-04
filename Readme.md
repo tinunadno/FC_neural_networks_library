@@ -117,7 +117,7 @@ namespace simple_conv::learning::learning_private {
 
 in [examples directory](https://github.com/tinunadno/FC_neural_networks_library/blob/master/examples) you can find some usage examples like 
 
- - [simple usage](https://github.com/tinunadno/FC_neural_networks_library/blob/master/examples/usage_example/main.cpp)
+ - [simple usage](https://github.com/tinunadno/FC_neural_networks_library/blob/master/examples/usage_exmple/main.cpp)
  - [weights visualization](https://github.com/tinunadno/FC_neural_networks_library/blob/master/examples/weights_visualization/main.cpp)
  - [*how your net see's perfect one*](https://github.com/tinunadno/FC_neural_networks_library/blob/master/examples/net_inverse/main.cpp)
  - [learning and preprocess example](https://github.com/tinunadno/FC_neural_networks_library/blob/master/examples/learning_example/main.cpp)
