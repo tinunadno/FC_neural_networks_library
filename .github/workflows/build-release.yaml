@@ -23,7 +23,7 @@ jobs:
           sudo apt install -y libboost-dev
           sudo apt install -y libopencv-dev
 
-      - name: Setup MKL on Ubuntu
+      - name: Setup MKL environment
         if: matrix.platform == 'ubuntu-latest'
         run: |
           echo "MKLROOT=/opt/intel/mkl" >> $GITHUB_ENV
@@ -31,7 +31,8 @@ jobs:
 
       - name: Build Project
         run: |
-          mkdir examples/gui_example/build && cd examples/gui_example/build
+          cd ./examples/gui_example
+          mkdir build && cd build
           cmake ..
           cmake --build .
 
