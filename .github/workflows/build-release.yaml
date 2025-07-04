@@ -38,7 +38,8 @@ jobs:
 
       - name: Package Binary
         run: |
-          cd examples/gui_example/build
+          ls
+          cd FC_neural_networks_library/examples/gui_example/build
           cp conv_lib_gui_example ../conv_lib_gui-${{ matrix.platform }}
           cd ..
           zip myapp-${{ matrix.platform }}.zip myapp-${{ matrix.platform }}
