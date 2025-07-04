@@ -32,9 +32,9 @@ jobs:
         if: matrix.platform == 'ubuntu-latest'
         run: |
           echo "MKLROOT=/opt/intel/mkl" >> $GITHUB_ENV
-          echo "Qt5_ROOT=/usr/include/x86_64-linux-gnu/qt5" >> $GITHUB_ENV
+          echo "Qt5_DIR=/usr/include/x86_64-linux-gnu/cmake/Qt5" >> $GITHUB_ENV
           export MKLROOT=/opt/intel/mkl
-          export Qt5_ROOT=/usr/include/x86_64-linux-gnu/qt5
+          export Qt5_DIR=/usr/include/x86_64-linux-gnu/cmake/Qt5
 
       - name: Build Project
         run: |
