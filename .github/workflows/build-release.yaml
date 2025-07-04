@@ -31,7 +31,7 @@ jobs:
 
       - name: Build Project
         run: |
-          cd ./examples/gui_example
+          cd FC_neural_networks_library//examples/gui_example
           mkdir build && cd build
           cmake ..
           cmake --build .
