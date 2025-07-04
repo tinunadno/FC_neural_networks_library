@@ -119,8 +119,8 @@ namespace simple_conv::io {
                     f_val *= 255.f;
                 }
                 auto curr_val = (unsigned char)(f_val);
-                sprintf(out_file_ptr, "%03d", curr_val);
-                out_file_ptr+=3;
+                int len = sprintf(out_file_ptr, "%u", curr_val);
+                out_file_ptr += len;
                 if(j + 1 < data.cols) {
                     *out_file_ptr++ = delimiter;
                 }

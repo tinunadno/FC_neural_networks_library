@@ -3,12 +3,17 @@ project(conv_lib)
 
 set(CMAKE_CXX_STANDARD 20)
 
-set(opencv_path "/home/perminov/clion/opencv/lib/cmake/opencv4")
-find_package(OpenCV 4.9.0 EXACT REQUIRED PATHS ${opencv_path} NO_DEFAULT_PATH)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp")
+
+set(MKL_NUM_THREADS 4)
+
+#set(opencv_path "/home/perminov/clion/opencv/lib/cmake/opencv4")
+#find_package(OpenCV 4.9.0 EXACT REQUIRED PATHS ${opencv_path} NO_DEFAULT_PATH)
+find_package(OpenCV REQUIRED)
 find_package(Boost COMPONENTS filesystem system)
-set(MKL_DIR "/home/perminov/intel/oneapi/mkl/latest/")
+set(MKL_DIR "/home/yura/intel/oneapi/mkl/latest/lib/cmake/mkl/")
 find_package(MKL REQUIRED)
-set(MKL_INCLUDE_DIRS "/home/perminov/intel/oneapi/mkl/latest/include/")
+set(MKL_INCLUDE_DIRS "/home/yura/intel/oneapi/mkl/latest/include/")
 
 message("-- Boost filesystem ${Boost_FILESYSTEM_LIBRARY}")
 message("-- Boost system ${Boost_SYSTEM_LIBRARY}")
@@ -42,6 +47,13 @@ target_link_libraries(
         ${Boost_SYSTEM_LIBRARY}
         ${OpenCV_LIBS}
         ${MKL_ROOT}/lib/libmkl_intel_lp64.so
-        ${MKL_ROOT}/lib/libmkl_sequential.so
+        ${MKL_ROOT}/lib/libmkl_intel_thread.so
+        ${MKL_ROOT}/../../compiler/latest/lib/libiomp5.so
+        #                ${MKL_ROOT}/lib/libmkl_sequential.so
         ${MKL_ROOT}/lib/libmkl_core.so
+        ${MKL_ROOT}/lib/libmkl_blacs_openmpi_ilp64.so
+        #        iomp5
+        pthread
+        m
+        dl
 )

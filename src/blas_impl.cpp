@@ -62,14 +62,24 @@ namespace simple_conv::mkl_BLAS_impl {
         cblas_saxpy(total, alpha, src2->data, 1, src1->data, 1);
     }
 
-    void broadcast_column_vector(mat *src1, const mat *addition) {
+    void broadcast_column_vector(mat* src1, const mat* addition) {
         CV_Assert(src1->rows == addition->rows);
-        CV_Assert(addition->cols == 1);
         int cols = src1->cols;
+#pragma omp parallel for
         for (int col = 0; col < cols; col++) {
-            for (int row = 0; row < src1->rows; row++) {
-                *(src1->data + col + row * cols) += *(addition->data + row);
-            }
+            cblas_saxpy(src1->rows, 1.0f,
+                        addition->data, 1,
+                        src1->data + col * src1->rows, 1);
+        }
+    }
+
+    void apply_relu_der(mat &dz, const mat &z) {
+        CV_Assert(dz.cols == z.cols);
+        CV_Assert(dz.rows == z.rows);
+        int total = dz.rows * dz.cols;
+#pragma omp parralel for simd
+        for (int i = 0; i < total; i++) {
+            dz.data[i] = z.data[i] <= 0.f ? 0.f : dz.data[i];
         }
     }
 
@@ -78,6 +88,7 @@ namespace simple_conv::mkl_BLAS_impl {
             *dst = mat(src->rows, src->cols);
         }
         CV_Assert(src->rows == dst->rows && src->cols == dst->cols);
+#pragma omp parralel for simd
         for (int i = 0; i < src->rows * src->cols; i++) {
             float val = *(src->data + i);
             *(dst->data + i) = val > 0.f ? val : 0.f;

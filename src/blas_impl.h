@@ -184,6 +184,8 @@ namespace simple_conv::mkl_BLAS_impl {
 
     void trash_hold(const mat *src, mat *dst);
 
+    void apply_relu_der(mat &dz, const mat &z);
+
     void reduce_columns(const mat *src, mat *dst);
 
     void mul_scalar(mat *m, float s);

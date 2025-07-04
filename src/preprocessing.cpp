@@ -60,6 +60,7 @@ namespace simple_conv::preprocessing{
 
         auto roi = cv::boundingRect(flat_contour);
 
+
         int diff = abs(roi.width - roi.height) / 2;
         if(roi.width < roi.height){
             roi.x -= diff;
@@ -74,8 +75,9 @@ namespace simple_conv::preprocessing{
         }
 
         if(roi.width == 0 || roi.height == 0){
-            throw std::exception();
+            return;
         }
+
         img = img(roi);
 
         img.convertTo(img, CV_32F, 1.0 / 255.0);
@@ -86,7 +88,7 @@ namespace simple_conv::preprocessing{
         if(!exists(in)){
             throw std::runtime_error("dataset doesn't exists!");
         }
-        auto dataset = simple_conv::io::load_dataset(in, false, ',', false);
+        auto dataset = simple_conv::io::load_dataset(in, false, ',', true);
         int size = (int)sqrtf((float)dataset.cols);
         for(int i = 0; i < dataset.rows; i++){
             cv::Mat row(1, dataset.cols - 1, CV_32F, dataset.data + dataset.cols * i + 1);

@@ -1,5 +1,6 @@
 #include "simple_conv.h"
 #include "sc_private.h"
+#include <mkl.h>
 
 namespace simple_conv::learning {
 
@@ -12,25 +13,6 @@ namespace simple_conv::learning {
             std::vector<mkl_BLAS_impl::mat> hidden_layers, dev_hidden_layers, gradient;
             sc_private::profiler profiler_;
         };
-
-        void apply_relu_der(mkl_BLAS_impl::mat &dz, const mkl_BLAS_impl::mat &z){
-            CV_Assert(dz.cols == z.cols);
-            CV_Assert(dz.rows == z.rows);
-            int total = dz.rows * dz.cols;
-            for(int i = 0; i < total; i++){
-                if(*(z.data + i) < 0){
-                    *(dz.data + i) = 0;
-                }
-            }
-        }
-
-        void broadcast_column_addition(cv::Mat &add_it_to_me, const cv::Mat &column_vec) {
-            for (int col = 0; col < add_it_to_me.cols; col++) {
-                for (int row = 0; row < add_it_to_me.rows; row++) {
-                    add_it_to_me.at<float>(row, col) += column_vec.at<float>(row);
-                }
-            }
-        }
 
         void forward_propagation(const mkl_BLAS_impl::mat &input_layer, const net &net,
                                  std::vector<mkl_BLAS_impl::mat> &hidden_layers) {
@@ -81,7 +63,7 @@ namespace simple_conv::learning {
                 mat nu_delta;
                 gemm_y(&net_[i - 1], &delta, 1.f, 0, 0, &nu_delta, GEMM_T_1);
                 delta = nu_delta;
-                apply_relu_der(delta, hidden_layers[i - 3]);
+                mkl_BLAS_impl::apply_relu_der(delta, hidden_layers[i - 3]);
             }
             mkl_BLAS_impl::gemm_y(&delta, &train_inputs, norm, 0, 0,
                                   &gradient[0], mkl_BLAS_impl::transpose_flags::GEMM_T_2);
@@ -225,6 +207,8 @@ namespace simple_conv::learning {
         using namespace std;
         using namespace cv;
 
+        std::cout << "MKL Num Threads: " << mkl_get_max_threads() << std::endl;
+
         learning_private::perc_learning_resources ls={net};
         learning_private::initialize_resources(net, dataset_path, &ls, dev_size);
 
@@ -260,8 +244,8 @@ namespace simple_conv::learning {
                     cout << "EPOCH: " << i << endl;
                     cout << "ACCURACY: " << accuracy << "%" << endl;
                     cout << "LEARNING RATE: " << grad_weight << endl;
-                    cout << "EPOCH ELAPSED TIME: " << duration << " microseconds" << endl;
-                    cout << "APPROXIMATE TIME LEFT: " << (float)((epoch_ - i) * duration) / 1000000.f << " seconds" << endl;
+                    cout << "EPOCH ELAPSED TIME: " << (float)duration / 1000000.f << " seconds" << endl;
+                    cout << "APPROXIMATE TIME LEFT: " << ((epoch_ - i) / (float)check_period * (float)duration) / 1000000.f << " seconds" << endl;
                     start = std::chrono::system_clock::now();
                 }
             }

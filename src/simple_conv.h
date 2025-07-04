@@ -19,7 +19,7 @@ namespace simple_conv {
         void apply_gradient_descend(net &net, const boost::filesystem::path &dataset_path,
                                     bool show_progress = false,
                                     float grad_weight = .1f,
-                                    int epoch_ = 500,
+                                    int epoch_ = 1000,
                                     int dev_size = 1000,
                                     int sample_size = -1,
                                     int check_period = 10,

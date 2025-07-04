@@ -5,7 +5,7 @@
 int main(int argc, char* argv[]){
     QApplication app(argc, argv);
     const std::string base_path = CONV_HOME;
-    const std::string net_path = base_path + "data/net_.conv";
+    const std::string net_path = base_path + "data/net_784_128_128_10.conv";
     MainWindow w;
     w.set_net_(net_path);
     w.show();

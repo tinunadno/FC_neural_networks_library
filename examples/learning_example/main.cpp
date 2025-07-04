@@ -5,15 +5,19 @@
 //TODO add ability to save alphabet to binary file
 
 int main(){
+
     std::string base_path = CONV_HOME;
-    std::string dataset_path = base_path + "data/processed_train.csv";
+//!  Dataset cropping example
+//    std::string dataset_path = base_path + "data/train.csv";
 //    std::string processed_dataset_path = base_path + "data/processed_train.csv";
-//
 //    simple_conv::preprocessing::preprocess_dataset(dataset_path, processed_dataset_path);
 
-    std::string write_back_path = base_path + "data/net.conv";
 
-    auto net = simple_conv::generate_empty_net({28 * 28, 64, 32, 10});
+    std::string dataset_path = base_path + "data/processed_train.csv";
+
+    std::string write_back_path = base_path + "data/net_784_10_10.conv";
+
+    auto net = simple_conv::generate_empty_net({28 * 28, 10, 10});
 
 
 

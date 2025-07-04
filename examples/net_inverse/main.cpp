@@ -1,6 +1,17 @@
 #include "simple_conv.h"
 #include "learning_private.h"
 
+void increase_contrast(cv::Mat& img, float alpha){
+    float avg = (float)cv::mean(img)[0];
+    img -= avg;
+    img *= alpha;
+//    double minVal, maxVal;
+//    cv::minMaxLoc(img, &minVal, &maxVal);
+//    for(int i = 0; i < img.total(); i++){
+//        *((float*)img.data + i) = (*((float*)img.data + i) + (float)minVal) / (float)maxVal;
+//    }
+}
+
 int main() {
     using namespace simple_conv;
     using namespace simple_conv::mkl_BLAS_impl;
@@ -66,7 +77,9 @@ int main() {
     }
 
     cv::Mat img(28, 28, CV_32F, input.data);
+//    increase_contrast(img, 3.f);
     img.convertTo(img, CV_8UC1, 255.f);
+    cv::blur(img, img, cv::Size(10, 10));
     cv::imwrite(wb_path, img);
 
     return 0;
