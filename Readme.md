@@ -80,6 +80,8 @@ net simple_conv::generate_empty_net(const std::vector<int> &shapes);
 void simple_conv::preprocessing::preprocess_dataset(const boost::filesystem::path& in, const boost::filesystem::path& out);
  ```
 
+---
+
 ## extended API
 
 if you wanna use some features from simple_conv::learning::learning_private (that are used in learning) in [<learning_private.h>](https://github.com/tinunadno/FC_neural_networks_library/blob/master/src/learning_private.h) file you can find stuff used in the learning process:
@@ -109,15 +111,19 @@ namespace simple_conv::learning::learning_private {
 } // learning_private
 ```
 
+---
+
 ## examples
 
 in [examples directory](https://github.com/tinunadno/FC_neural_networks_library/blob/master/examples) you can find some usage examples like 
 
- - [simple usage](examples/usage_example/main.cpp)
+ - [simple usage](https://github.com/tinunadno/FC_neural_networks_library/blob/master/examples/usage_example/main.cpp)
  - [weights visualization](https://github.com/tinunadno/FC_neural_networks_library/blob/master/examples/weights_visualization/main.cpp)
  - [*how your net see's perfect one*](https://github.com/tinunadno/FC_neural_networks_library/blob/master/examples/net_inverse/main.cpp)
  - [learning and preprocess example](https://github.com/tinunadno/FC_neural_networks_library/blob/master/examples/learning_example/main.cpp)
  - [cool gui](https://github.com/tinunadno/FC_neural_networks_library/blob/master/examples/gui_example/main.cpp)
+
+---
 
 ## Performance
 
@@ -131,13 +137,15 @@ same thing with numpy takes about .12-.18 seconds, so I guess it's fine :D
 
 for dataset with shape 42000*785 (with labels) takes about 2.5 seconds (with converting to mat structure)
 
-same thing with pandas takes about 2.7 seconds
+same thing with pandas takes about 2.5-2.7 seconds
+
+---
 
 ## implementation
 
 ### linear algebra
 
-I've implemented a [small highly optimized mathematical library](https://github.com/tinunadno/FC_neural_networks_library/blob/master/src/blas_impl.cpp) designed to linear algebra operations
+I've implemented a [tiny highly optimized mathematical library](https://github.com/tinunadno/FC_neural_networks_library/blob/master/src/blas_impl.cpp) designed to linear algebra operations
 in the context of neural networks. It uses Intel MKL (Math Kernel Library) for maximum performance on the CPU, 
 and also uses some parallel computing features via OpenMP.
 
