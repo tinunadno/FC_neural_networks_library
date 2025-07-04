@@ -1,8 +1,10 @@
 name: Build and Release
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
 
 jobs:
   build:
@@ -12,16 +14,11 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup CMake
-        uses: lukka/get-cmake@v4
-
       - name: Install dependencies
         if: matrix.platform == 'ubuntu-latest'
         run: |
           sudo apt update
+          sudo apt install -y build-essential
           sudo apt install -y intel-mkl-64bit-2023
           sudo apt install -y libboost-dev
           sudo apt install -y libopencv-dev
