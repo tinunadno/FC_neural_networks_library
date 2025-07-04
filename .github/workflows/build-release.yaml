@@ -31,14 +31,14 @@ jobs:
 
       - name: Build Project
         run: |
-          cd FC_neural_networks_library//examples/gui_example
+          ls
+          cd examples/gui_example/
           mkdir build && cd build
           cmake ..
-          cmake --build .
 
+          cmake --build .
       - name: Package Binary
         run: |
-          ls
           cd FC_neural_networks_library/examples/gui_example/build
           cp conv_lib_gui_example ../conv_lib_gui-${{ matrix.platform }}
           cd ..
